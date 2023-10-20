@@ -49,7 +49,6 @@ pub struct ChessApp {
 
 impl Default for ChessApp {
     fn default() -> Self {
-        let board = Board::default();
         Self {
             board: Chess::default(),
             player_color: Color::Black,
@@ -72,44 +71,79 @@ impl ChessApp {
             .max_col_width(square_size)
             .spacing([0f32, 0f32])
             .show(ui, |ui| {
+                let mut legal_moves = self.board.legal_moves();
+                if let Some(selected_piece) = self.selected_piece {
+                    legal_moves.retain(|m| {
+                        m.from() == self.selected_square && m.role() == selected_piece.role
+                    });
+                }
+                let (mut legal_squares, mut colors): (Vec<&Square>, Vec<Color32>) = legal_moves
+                    .iter()
+                    .map(|m| match m {
+                        Move::Normal { to, capture, .. } => {
+                            if capture.is_some() {
+                                (to, Color32::RED)
+                            } else {
+                                (to, Color32::GREEN)
+                            }
+                        }
+                        Move::EnPassant { to, .. } => (to, Color32::RED),
+                        Move::Castle { king, rook } => {
+                            if self.selected_piece.unwrap().role == Role::King {
+                                (king, Color32::GREEN)
+                            } else {
+                                (rook, Color32::GREEN)
+                            }
+                        }
+                        Move::Put { .. } => {
+                            unreachable!("There should be no `put` move in a normal game.")
+                        }
+                    })
+                    .unzip();
+                if self.selected_piece.is_none() {
+                    legal_squares = vec![];
+                    colors = vec![];
+                };
                 for row in 0..8 {
                     for column in 0..8 {
                         let idx = row * 8 + column;
                         let square = Square::new(idx);
 
-                        let square_color = if square.is_light() {
-                            Color32::from_rgb(244, 197, 151)
-                        } else {
+                        let mut square_color = if self.selected_square.is_some()
+                            && square == self.selected_square.unwrap()
+                        {
+                            Color32::from_rgb(74, 185, 219)
+                        } else if square.is_dark() {
                             Color32::from_rgb(200, 133, 69)
+                        } else {
+                            // square.is_light()
+                            Color32::from_rgb(244, 197, 151)
                         };
 
-                        // Image to be placed on empty squares
-                        let texture = ctx.load_texture(
-                            "square",
-                            egui::ColorImage::new(
-                                [square_size as usize, square_size as usize],
-                                square_color,
-                            ),
-                            Default::default(),
-                        );
-
+                        if legal_squares.contains(&&square) {
+                            square_color =
+                                colors[legal_squares.iter().position(|v| *v == &square).unwrap()]
+                        }
                         if let Some(piece) = self.board.board().piece_at(square) {
-                            let piece_img =
-                                ImageButton::new(load_image_for_piece(ctx, piece).bg_fill(
-                                    // Set blueish background for the selected piece
-                                    if self.selected_square == Some(square) {
-                                        Color32::from_rgb(74, 185, 219)
-                                    } else {
-                                        square_color
-                                    },
-                                ))
-                                .frame(false);
+                            let piece_img = ImageButton::new(
+                                load_image_for_piece(ctx, piece).bg_fill(square_color),
+                            )
+                            .frame(false);
 
-                            if ui.add(piece_img).clicked() {
+                            if ui.add(piece_img).clicked() && self.player_color == piece.color {
                                 self.selected_piece = Some(piece);
                                 self.selected_square = Some(square);
                             };
                         } else {
+                            // Image to be placed on empty squares
+                            let texture = ctx.load_texture(
+                                "square",
+                                egui::ColorImage::new(
+                                    [square_size as usize, square_size as usize],
+                                    square_color,
+                                ),
+                                Default::default(),
+                            );
                             ui.image((texture.id(), texture.size_vec2()));
                         }
                     }
