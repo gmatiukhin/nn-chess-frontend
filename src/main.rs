@@ -12,9 +12,12 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "eframe template",
+        "Chess Tournament",
         native_options,
-        Box::new(|cc| Box::new(chess_ai_frontend::TemplateApp::new(cc))),
+        Box::new(|cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            Box::new(chess_ai_frontend::ChessApp::new(cc))
+        }),
     )
 }
 
@@ -31,7 +34,10 @@ fn main() {
             .start(
                 "the_canvas_id", // hardcode it
                 web_options,
-                Box::new(|cc| Box::new(chess_ai_frontend::TemplateApp::new(cc))),
+                Box::new(|cc| {
+                    egui_extras::install_image_loaders(&cc.egui_ctx);
+                    Box::new(chess_ai_frontend::ChessApp::new(cc))
+                }),
             )
             .await
             .expect("failed to start eframe");

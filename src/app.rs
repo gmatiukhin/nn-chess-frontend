@@ -1,54 +1,129 @@
-/// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
-    // Example stuff:
-    label: String,
+use egui::{
+    load::SizedTexture, Align2, Button, Color32, Frame, Image, ImageButton, Memory, TextureHandle,
+    Vec2,
+};
+use shakmaty::{Board, Chess, Color, Move, Piece, Position, Role, Square};
 
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
+fn square_size(ctx: &egui::Context) -> f32 {
+    let from_screen = (ctx.screen_rect().height().min(ctx.screen_rect().width()) / 8f32).min(80f32);
+    if let Some(area_rect) = ctx.memory(|mem| mem.area_rect("board_area")) {
+        (area_rect.height().min(area_rect.width()) / 8f32)
+            .min(80f32)
+            .min(from_screen)
+    } else {
+        from_screen
+    }
 }
 
-impl Default for TemplateApp {
+fn load_image_for_piece(ctx: &egui::Context, piece: Piece) -> Image<'static> {
+    let img = match piece.color {
+        shakmaty::Color::Black => match piece.role {
+            shakmaty::Role::Pawn => Image::new(egui::include_image!("../assets/bp.svg")),
+            shakmaty::Role::Knight => Image::new(egui::include_image!("../assets/bn.svg")),
+            shakmaty::Role::Bishop => Image::new(egui::include_image!("../assets/bb.svg")),
+            shakmaty::Role::Rook => Image::new(egui::include_image!("../assets/br.svg")),
+            shakmaty::Role::Queen => Image::new(egui::include_image!("../assets/bq.svg")),
+            shakmaty::Role::King => Image::new(egui::include_image!("../assets/bk.svg")),
+        },
+        shakmaty::Color::White => match piece.role {
+            shakmaty::Role::Pawn => Image::new(egui::include_image!("../assets/wp.svg")),
+            shakmaty::Role::Knight => Image::new(egui::include_image!("../assets/wn.svg")),
+            shakmaty::Role::Bishop => Image::new(egui::include_image!("../assets/wb.svg")),
+            shakmaty::Role::Rook => Image::new(egui::include_image!("../assets/wr.svg")),
+            shakmaty::Role::Queen => Image::new(egui::include_image!("../assets/wq.svg")),
+            shakmaty::Role::King => Image::new(egui::include_image!("../assets/wk.svg")),
+        },
+    };
+
+    let square_size = square_size(ctx);
+    img.maintain_aspect_ratio(true)
+        .fit_to_exact_size([square_size, square_size].into())
+}
+
+pub struct ChessApp {
+    board: Chess,
+    player_color: Color,
+    selected_piece: Option<Piece>,
+    selected_square: Option<Square>,
+}
+
+impl Default for ChessApp {
     fn default() -> Self {
+        let board = Board::default();
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+            board: Chess::default(),
+            player_color: Color::Black,
+            selected_piece: None,
+            selected_square: None,
         }
     }
 }
 
-impl TemplateApp {
-    /// Called once before the first frame.
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // This is also where you can customize the look and feel of egui using
-        // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
-
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
-            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
-        }
-
+impl ChessApp {
+    pub fn new(_: &eframe::CreationContext<'_>) -> Self {
         Default::default()
     }
+
+    fn show_board(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let square_size = square_size(ctx);
+        egui::Grid::new("chess_board")
+            .min_col_width(square_size)
+            .min_row_height(square_size)
+            .max_col_width(square_size)
+            .spacing([0f32, 0f32])
+            .show(ui, |ui| {
+                for row in 0..8 {
+                    for column in 0..8 {
+                        let idx = row * 8 + column;
+                        let square = Square::new(idx);
+
+                        let square_color = if square.is_light() {
+                            Color32::from_rgb(244, 197, 151)
+                        } else {
+                            Color32::from_rgb(200, 133, 69)
+                        };
+
+                        // Image to be placed on empty squares
+                        let texture = ctx.load_texture(
+                            "square",
+                            egui::ColorImage::new(
+                                [square_size as usize, square_size as usize],
+                                square_color,
+                            ),
+                            Default::default(),
+                        );
+
+                        if let Some(piece) = self.board.board().piece_at(square) {
+                            let piece_img =
+                                ImageButton::new(load_image_for_piece(ctx, piece).bg_fill(
+                                    // Set blueish background for the selected piece
+                                    if self.selected_square == Some(square) {
+                                        Color32::from_rgb(74, 185, 219)
+                                    } else {
+                                        square_color
+                                    },
+                                ))
+                                .frame(false);
+
+                            if ui.add(piece_img).clicked() {
+                                self.selected_piece = Some(piece);
+                                self.selected_square = Some(square);
+                            };
+                        } else {
+                            ui.image((texture.id(), texture.size_vec2()));
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+    }
 }
 
-impl eframe::App for TemplateApp {
-    /// Called by the framework to save state before shutdown.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        eframe::set_value(storage, eframe::APP_KEY, self);
-    }
-
+impl eframe::App for ChessApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
-
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
-
             egui::menu::bar(ui, |ui| {
                 #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
                 {
@@ -66,25 +141,17 @@ impl eframe::App for TemplateApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            ui.heading("Chess Tournament");
 
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
+            egui::Area::new("board_area")
+                .anchor(Align2::CENTER_CENTER, [0f32, 0f32])
+                .movable(false)
+                .show(ctx, |ui| {
+                    self.show_board(ctx, ui);
+                });
+        });
 
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
-            }
-
-            ui.separator();
-
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/master/",
-                "Source code."
-            ));
-
+        egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "footer").show(ctx, |ui| {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 powered_by_egui_and_eframe(ui);
                 egui::warn_if_debug_build(ui);
