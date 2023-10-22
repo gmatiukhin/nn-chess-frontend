@@ -1,50 +1,9 @@
-use egui::{Align2, Color32, Image, ImageButton, Sense};
-use shakmaty::{Board, Chess, Color, Move, MoveList, Piece, Position, Square};
+use egui::{Image, ImageButton, Sense};
+use shakmaty::{Chess, Color, Move, Piece, Position, Square};
 
-fn square_size(ctx: &egui::Context) -> f32 {
-    // if let Some(area_rect) = ctx.memory(|mem| mem.area_rect("board_area")) {
-    //     (area_rect.height().min(area_rect.width()) / 8f32).min(80f32)
-    // } else {
-    (ctx.screen_rect().height().min(ctx.screen_rect().width()) / 8f32).min(80f32)
-    // }
-}
+mod utils;
 
-fn load_image_for_piece(ctx: &egui::Context, piece: Piece) -> Image<'static> {
-    let img = match piece.color {
-        shakmaty::Color::Black => match piece.role {
-            shakmaty::Role::Pawn => Image::new(egui::include_image!("../assets/bp.svg")),
-            shakmaty::Role::Knight => Image::new(egui::include_image!("../assets/bn.svg")),
-            shakmaty::Role::Bishop => Image::new(egui::include_image!("../assets/bb.svg")),
-            shakmaty::Role::Rook => Image::new(egui::include_image!("../assets/br.svg")),
-            shakmaty::Role::Queen => Image::new(egui::include_image!("../assets/bq.svg")),
-            shakmaty::Role::King => Image::new(egui::include_image!("../assets/bk.svg")),
-        },
-        shakmaty::Color::White => match piece.role {
-            shakmaty::Role::Pawn => Image::new(egui::include_image!("../assets/wp.svg")),
-            shakmaty::Role::Knight => Image::new(egui::include_image!("../assets/wn.svg")),
-            shakmaty::Role::Bishop => Image::new(egui::include_image!("../assets/wb.svg")),
-            shakmaty::Role::Rook => Image::new(egui::include_image!("../assets/wr.svg")),
-            shakmaty::Role::Queen => Image::new(egui::include_image!("../assets/wq.svg")),
-            shakmaty::Role::King => Image::new(egui::include_image!("../assets/wk.svg")),
-        },
-    };
-
-    let square_size = square_size(ctx);
-    img.maintain_aspect_ratio(true)
-        .fit_to_exact_size([square_size, square_size].into())
-}
-
-struct SquareColor {}
-
-impl SquareColor {
-    const SELECTED: Color32 = Color32::from_rgb(74, 185, 219);
-    const DARK: Color32 = Color32::from_rgb(200, 133, 69);
-    const LIGHT: Color32 = Color32::from_rgb(244, 197, 151);
-    // TODO: better colors
-    const MOVE_TARGET: Color32 = Color32::LIGHT_GREEN;
-    const ATTACK_TARGET: Color32 = Color32::LIGHT_RED;
-    const LAST_MOVE: Color32 = Color32::KHAKI;
-}
+use utils::*;
 
 struct PieceSelection {
     piece: Piece,
@@ -85,17 +44,17 @@ struct LastMove {
     b: Square,
 }
 
-pub struct ChessApp {
-    board: Chess,
+pub struct ChessBoard {
+    chess: Chess,
     player_color: Color,
     selection: Option<PieceSelection>,
     last_move: Option<LastMove>,
 }
 
-impl Default for ChessApp {
+impl Default for ChessBoard {
     fn default() -> Self {
         Self {
-            board: Chess::default(),
+            chess: Chess::default(),
             player_color: Color::Black,
             selection: None,
             last_move: None,
@@ -103,12 +62,16 @@ impl Default for ChessApp {
     }
 }
 
-impl ChessApp {
-    pub fn new(_: &eframe::CreationContext<'_>) -> Self {
-        Default::default()
+impl ChessBoard {
+    pub fn new(chess: Chess, player_color: Color) -> Self {
+        Self {
+            chess,
+            player_color,
+            ..Default::default()
+        }
     }
 
-    fn show_board(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+    pub fn show(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let square_size = square_size(ctx);
         egui::Grid::new("chess_board")
             .min_col_width(square_size)
@@ -163,7 +126,7 @@ impl ChessApp {
 
                         // Produce square image and figure out if there is a piece on it
                         let (square_img, square_content) = if let Some(piece) =
-                            self.board.board().piece_at(curr_square)
+                            self.chess.board().piece_at(curr_square)
                         {
                             let img = ImageButton::new(
                                 load_image_for_piece(ctx, piece).bg_fill(square_color),
@@ -211,14 +174,14 @@ impl ChessApp {
                         if ui.add(square_img).clicked() {
                             match square_content {
                                 SquareContent::HasPiece(piece) => {
-                                    if self.board.turn() == piece.color
+                                    if self.chess.turn() == piece.color
                                         && self.player_color == piece.color
                                     {
                                         // Selecting own piece
                                         self.selection = Some(PieceSelection::new(
                                             piece,
                                             curr_square,
-                                            &self.board,
+                                            &self.chess,
                                         ));
                                     } else {
                                         // Attacking opponent's piece
@@ -228,7 +191,7 @@ impl ChessApp {
                                                 .1;
                                             // We can use `play_unchecked` because only the legal
                                             // squares ever become interactable
-                                            self.board.play_unchecked(m);
+                                            self.chess.play_unchecked(m);
                                             self.last_move = Some(LastMove {
                                                 a: m.from().unwrap(),
                                                 b: m.to(),
@@ -241,7 +204,7 @@ impl ChessApp {
                                     if let Some(idx) = can_be_moved_to_square {
                                         let m =
                                             &self.selection.as_ref().unwrap().legal_moves[idx].1;
-                                        self.board.play_unchecked(m);
+                                        self.chess.play_unchecked(m);
                                         self.last_move = Some(if m.is_castle() {
                                             m.castling_side()
                                                 .map(|s| LastMove {
@@ -277,59 +240,4 @@ impl ChessApp {
                 }
             });
     }
-}
-
-impl eframe::App for ChessApp {
-    /// Called each time the UI needs repainting, which may be many times per second.
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            // The top panel is often a good place for a menu bar:
-            egui::menu::bar(ui, |ui| {
-                #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
-                {
-                    ui.menu_button("File", |ui| {
-                        if ui.button("Quit").clicked() {
-                            _frame.close();
-                        }
-                    });
-                    ui.add_space(16.0);
-                }
-
-                egui::widgets::global_dark_light_mode_buttons(ui);
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("Chess Tournament");
-
-            egui::Area::new("board_area")
-                .anchor(Align2::CENTER_CENTER, [0f32, 0f32])
-                .movable(false)
-                .show(ctx, |ui| {
-                    self.show_board(ctx, ui);
-                });
-        });
-
-        egui::TopBottomPanel::new(egui::panel::TopBottomSide::Bottom, "footer").show(ctx, |ui| {
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
-                egui::warn_if_debug_build(ui);
-            });
-        });
-    }
-}
-
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to(
-            "eframe",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
-        ui.label(".");
-    });
 }

@@ -12,11 +12,11 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "Chess Tournament",
+        "Unchessful Games",
         native_options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::new(chess_ai_frontend::ChessApp::new(cc))
+            Box::new(chess_ai_frontend::App::new(cc))
         }),
     )
 }
@@ -36,7 +36,7 @@ fn main() {
                 web_options,
                 Box::new(|cc| {
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Box::new(chess_ai_frontend::ChessApp::new(cc))
+                    Box::new(chess_ai_frontend::App::new(cc))
                 }),
             )
             .await
