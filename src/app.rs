@@ -1,18 +1,12 @@
-use egui::{
-    load::SizedTexture, Align2, Button, Color32, Frame, Image, ImageButton, Memory, TextureHandle,
-    Vec2,
-};
-use shakmaty::{Board, Chess, Color, Move, Piece, Position, Role, Square};
+use egui::{Align2, Color32, Image, ImageButton};
+use shakmaty::{Chess, Color, Move, Piece, Position, Square};
 
 fn square_size(ctx: &egui::Context) -> f32 {
-    let from_screen = (ctx.screen_rect().height().min(ctx.screen_rect().width()) / 8f32).min(80f32);
-    if let Some(area_rect) = ctx.memory(|mem| mem.area_rect("board_area")) {
-        (area_rect.height().min(area_rect.width()) / 8f32)
-            .min(80f32)
-            .min(from_screen)
-    } else {
-        from_screen
-    }
+    // if let Some(area_rect) = ctx.memory(|mem| mem.area_rect("board_area")) {
+    //     (area_rect.height().min(area_rect.width()) / 8f32).min(80f32)
+    // } else {
+    (ctx.screen_rect().height().min(ctx.screen_rect().width()) / 8f32).min(80f32)
+    // }
 }
 
 fn load_image_for_piece(ctx: &egui::Context, piece: Piece) -> Image<'static> {
@@ -77,33 +71,33 @@ impl ChessApp {
                         m.from() == self.selected_square && m.role() == selected_piece.role
                     });
                 }
-                let (mut legal_squares, mut colors): (Vec<&Square>, Vec<Color32>) = legal_moves
-                    .iter()
-                    .map(|m| match m {
-                        Move::Normal { to, capture, .. } => {
-                            if capture.is_some() {
-                                (to, Color32::RED)
-                            } else {
-                                (to, Color32::GREEN)
-                            }
-                        }
-                        Move::EnPassant { to, .. } => (to, Color32::RED),
-                        Move::Castle { king, rook } => {
-                            if self.selected_piece.unwrap().role == Role::King {
-                                (king, Color32::GREEN)
-                            } else {
-                                (rook, Color32::GREEN)
-                            }
-                        }
-                        Move::Put { .. } => {
-                            unreachable!("There should be no `put` move in a normal game.")
-                        }
-                    })
-                    .unzip();
-                if self.selected_piece.is_none() {
-                    legal_squares = vec![];
-                    colors = vec![];
-                };
+                let (legal_squares, colors): (Vec<Square>, Vec<Color32>) =
+                    if self.selected_piece.is_none() {
+                        (vec![], vec![])
+                    } else {
+                        legal_moves
+                            .iter()
+                            .map(|m| match m {
+                                Move::Normal { to, capture, .. } => {
+                                    if capture.is_some() {
+                                        (*to, Color32::RED)
+                                    } else {
+                                        (*to, Color32::GREEN)
+                                    }
+                                }
+                                Move::EnPassant { to, .. } => (*to, Color32::RED),
+                                Move::Castle { .. } => (
+                                    m.castling_side()
+                                        .unwrap()
+                                        .king_to(self.selected_piece.unwrap().color),
+                                    Color32::GREEN,
+                                ),
+                                Move::Put { .. } => {
+                                    unreachable!("There should be no `put` move in a normal game.")
+                                }
+                            })
+                            .unzip()
+                    };
                 for row in 0..8 {
                     for column in 0..8 {
                         let idx = row * 8 + column;
@@ -120,9 +114,9 @@ impl ChessApp {
                             Color32::from_rgb(244, 197, 151)
                         };
 
-                        if legal_squares.contains(&&square) {
+                        if legal_squares.contains(&square) {
                             square_color =
-                                colors[legal_squares.iter().position(|v| *v == &square).unwrap()]
+                                colors[legal_squares.iter().position(|v| *v == square).unwrap()]
                         }
                         if let Some(piece) = self.board.board().piece_at(square) {
                             let piece_img = ImageButton::new(
@@ -130,9 +124,25 @@ impl ChessApp {
                             )
                             .frame(false);
 
-                            if ui.add(piece_img).clicked() && self.player_color == piece.color {
-                                self.selected_piece = Some(piece);
-                                self.selected_square = Some(square);
+                            if ui.add(piece_img).clicked() {
+                                // TODO: play against yourself
+                                if self.board.turn() == piece.color
+                                // && self.player_color == piece.color
+                                {
+                                    // Slecting own piece
+                                    self.selected_piece = Some(piece);
+                                    self.selected_square = Some(square);
+                                } else {
+                                    // Attacking an enemy piece
+                                    if legal_squares.contains(&square) {
+                                        self.board.play_unchecked(
+                                            &legal_moves[legal_squares
+                                                .iter()
+                                                .position(|v| *v == square)
+                                                .unwrap()],
+                                        );
+                                    }
+                                }
                             };
                         } else {
                             // Image to be placed on empty squares
@@ -144,7 +154,31 @@ impl ChessApp {
                                 ),
                                 Default::default(),
                             );
-                            ui.image((texture.id(), texture.size_vec2()));
+
+                            if legal_squares.contains(&square) {
+                                if ui
+                                    .add(
+                                        ImageButton::new(Image::new((
+                                            texture.id(),
+                                            texture.size_vec2(),
+                                        )))
+                                        .frame(false),
+                                    )
+                                    .clicked()
+                                {
+                                    // We can guarantee legality as the square becomes a button
+                                    // only when it is a destination of a legal move of the
+                                    // selected piece
+                                    self.board.play_unchecked(
+                                        &legal_moves[legal_squares
+                                            .iter()
+                                            .position(|v| *v == square)
+                                            .unwrap()],
+                                    );
+                                };
+                            } else {
+                                ui.image((texture.id(), texture.size_vec2()));
+                            };
                         }
                     }
                     ui.end_row();
