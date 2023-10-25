@@ -9,10 +9,25 @@ use web_types::{EngineVariant, GameMoveResponse};
 
 use crate::requests::RequestLoopComm;
 
+#[derive(Debug)]
 pub(crate) struct AiGameSettings {
-    pub(crate) engine_move_receiver: Option<oneshot::Receiver<anyhow::Result<GameMoveResponse>>>,
-    pub(crate) ai_variant: EngineVariant,
-    pub(crate) sender: mpsc::UnboundedSender<crate::requests::RequestLoopComm>,
+    engine_move_receiver: Option<oneshot::Receiver<anyhow::Result<GameMoveResponse>>>,
+    ai_variant: EngineVariant,
+    sender: mpsc::Sender<crate::requests::RequestLoopComm>,
+}
+
+impl AiGameSettings {
+    pub fn new(
+        variant: EngineVariant,
+        sender: mpsc::Sender<crate::requests::RequestLoopComm>,
+    ) -> Self {
+        log::info!("Reconfiguring AiGameSettings: variant: {variant:?}");
+        AiGameSettings {
+            engine_move_receiver: None,
+            ai_variant: variant,
+            sender,
+        }
+    }
 }
 
 pub(crate) enum GameMode {
@@ -98,7 +113,12 @@ impl ChessBoard {
         self.game_mode = game_mode;
     }
     pub(crate) fn start_game(&mut self) {
+        self.chess = Chess::default();
         self.game_started = true;
+    }
+
+    pub fn game_started(&self) -> bool {
+        self.game_started
     }
 
     fn play_move(&mut self, m: &Move) {
@@ -127,9 +147,10 @@ impl ChessBoard {
         {
             return;
         }
-        if let GameMode::PlayAgainsAI(ref mut ai_game_settings) = self.game_mode {
-            log::info!("a");
-            if let Some(ref move_receiver) = ai_game_settings.engine_move_receiver {
+        if let GameMode::PlayAgainsAI(ai_game_settings) = &mut self.game_mode {
+            log::info!("a {ai_game_settings:?}");
+
+            if let Some(move_receiver) = &ai_game_settings.engine_move_receiver {
                 log::info!("b");
                 if let Ok(Ok(m)) = move_receiver.try_recv() {
                     log::info!("c");
@@ -149,9 +170,10 @@ impl ChessBoard {
                     RequestLoopComm::FetchPosEval(ai_game_settings.ai_variant.clone(), fen, sender);
                 ai_game_settings
                     .sender
-                    .send(req)
+                    .try_send(req)
                     .expect("error communicating with request loop");
                 ai_game_settings.engine_move_receiver = Some(receiver);
+                log::info!("d {ai_game_settings:?}");
             }
         }
     }

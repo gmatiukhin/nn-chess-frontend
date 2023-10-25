@@ -17,8 +17,8 @@ pub enum RequestLoopComm {
     ),
 }
 
-pub fn run_request_loop(ctx: Context) -> mpsc::UnboundedSender<RequestLoopComm> {
-    let (request_sender, mut request_receiver) = mpsc::unbounded_channel::<RequestLoopComm>();
+pub fn run_request_loop(ctx: Context) -> mpsc::Sender<RequestLoopComm> {
+    let (request_sender, mut request_receiver) = mpsc::channel::<RequestLoopComm>(10);
     let _ = Promise::spawn_local(async move {
         while let Some(comm) = request_receiver.recv().await {
             log::debug!("Received request: {comm:?}");

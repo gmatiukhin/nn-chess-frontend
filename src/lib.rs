@@ -3,6 +3,7 @@
 use std::fmt::Display;
 
 use chess::{AiGameSettings, GameMode};
+use log::{info, warn};
 use shakmaty::Color;
 use tokio::sync::mpsc;
 
@@ -19,7 +20,7 @@ pub struct App {
     game_mode_selection: GameModeSelector,
     fetch_engine_data: bool,
     engine_data: EngineData,
-    request_loop_sender: mpsc::UnboundedSender<requests::RequestLoopComm>,
+    request_loop_sender: mpsc::Sender<requests::RequestLoopComm>,
     engine_dir_receiver: Option<oneshot::Receiver<Result<EngineDirectory>>>,
     engine_desc_receiver: Option<oneshot::Receiver<Result<EngineDescription>>>,
 }
@@ -44,6 +45,7 @@ struct EngineData {
     selected_engine: Option<EngineRef>,
     desc: Option<EngineDescription>,
     variant: Option<EngineVariant>,
+    engine_variant_uncommitted: bool,
 }
 
 impl App {
@@ -52,7 +54,7 @@ impl App {
 
         Self {
             chessboard: Default::default(),
-            game_mode_selection: GameModeSelector::PlayAgainsYourself,
+            game_mode_selection: GameModeSelector::PlayAgainsAI,
             fetch_engine_data: true,
             engine_data: EngineData::default(),
             request_loop_sender: req_comm_loop,
@@ -100,13 +102,13 @@ impl App {
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut self.game_mode_selection,
-                        GameModeSelector::PlayAgainsYourself,
-                        format!("{}", GameModeSelector::PlayAgainsYourself),
+                        GameModeSelector::PlayAgainsAI,
+                        format!("{}", GameModeSelector::PlayAgainsAI),
                     );
                     ui.selectable_value(
                         &mut self.game_mode_selection,
-                        GameModeSelector::PlayAgainsAI,
-                        format!("{}", GameModeSelector::PlayAgainsAI),
+                        GameModeSelector::PlayAgainsYourself,
+                        format!("{}", GameModeSelector::PlayAgainsYourself),
                     );
                 });
 
@@ -121,7 +123,7 @@ impl App {
                     let (sender, receiver) = oneshot::channel();
                     let req = RequestLoopComm::FetchEngines(sender);
                     self.request_loop_sender
-                        .send(req)
+                        .try_send(req)
                         .expect("Error communicating with request loop");
 
                     self.engine_dir_receiver = Some(receiver);
@@ -131,10 +133,11 @@ impl App {
                     if let Ok(Ok(engines)) = recv.try_recv() {
                         self.engine_data.available_engines = Some(engines.clone());
                         self.engine_data.selected_engine = Some(engines.engines[0].clone());
+                        self.engine_data.engine_variant_uncommitted = true;
                     }
                 }
                 if let Some(data) = self.engine_data.selected_engine.as_mut() {
-                    egui::ComboBox::from_id_source("engine_selection")
+                    let cbox_resp = egui::ComboBox::from_id_source("engine_selection")
                         .selected_text(data.name.to_string())
                         .show_ui(ui, |ui| {
                             for engine in self
@@ -148,6 +151,11 @@ impl App {
                                 ui.selectable_value(data, engine.clone(), engine.name.clone());
                             }
                         });
+
+                    if cbox_resp.response.changed() {
+                        log::info!("Engine changed to: {data:?}");
+                        self.engine_data.engine_variant_uncommitted = true;
+                    }
 
                     Grid::new("current_engine_info").show(ui, |ui| {
                         let selected_engine = data.clone();
@@ -172,47 +180,60 @@ impl App {
                             sender,
                         );
                         self.request_loop_sender
-                            .send(req)
+                            .try_send(req)
                             .expect("Error communicating with request loop");
                         self.engine_desc_receiver = Some(receiver);
                     }
                     if let Some(recv) = &self.engine_desc_receiver {
                         if let Ok(Ok(desc)) = recv.try_recv() {
+                            log::info!("Received engine description: {desc:?}");
                             self.engine_data.desc = Some(desc.clone());
+                            self.engine_data.engine_variant_uncommitted = true;
                         }
                     }
                     if let Some(desc) = &mut self.engine_data.desc {
                         ui.heading(desc.name.clone());
                         ui.label(desc.text_description.clone());
 
-                        let checkpoint = &mut desc.best_available_variant;
+                        if self.engine_data.variant == None {
+                            self.engine_data.variant = Some(desc.best_available_variant.clone());
+                        }
+
+                        let mut checkpoint = self.engine_data.variant.as_ref().unwrap().clone();
                         egui::ComboBox::from_id_source("variant_selection")
                             .selected_text(checkpoint.name.to_string())
                             .show_ui(ui, |ui| {
                                 for variant in &desc.variants {
                                     ui.selectable_value(
-                                        checkpoint,
+                                        &mut checkpoint,
                                         variant.clone(),
                                         variant.name.clone(),
                                     );
                                 }
                             });
-                        self.engine_data.variant = Some(checkpoint.clone());
+                        if Some(&checkpoint) != self.engine_data.variant.as_ref() {
+                            log::info!("Changed variant: new is {checkpoint:?}");
+                            self.engine_data.engine_variant_uncommitted = true;
+                            self.engine_data.variant = Some(checkpoint);
+                        }
                     }
-                }
-                if let Some(ai_variant) = &self.engine_data.variant {
-                    self.chessboard.configure_game(
-                        Color::Black,
-                        GameMode::PlayAgainsAI(AiGameSettings {
-                            engine_move_receiver: None,
-                            ai_variant: ai_variant.clone(),
-                            sender: self.request_loop_sender.clone(),
-                        }),
-                    );
                 }
             }
             if ui.button("Play").clicked() {
-                self.chessboard.start_game();
+                info!("Starting game!");
+                if let Some(variant) = &self.engine_data.variant {
+                    self.chessboard.configure_game(
+                        Color::Black,
+                        GameMode::PlayAgainsAI(AiGameSettings::new(
+                            variant.clone(),
+                            self.request_loop_sender.clone(),
+                        )),
+                    );
+
+                    self.chessboard.start_game();
+                } else {
+                    warn!("Tried to start game without any AI variant");
+                }
             }
         });
     }
