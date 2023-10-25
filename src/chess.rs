@@ -184,6 +184,12 @@ impl ChessBoard {
             .show(ui, |ui| {
                 for row in 0..8 {
                     for column in 0..8 {
+                        let (mut row, mut column) = (row, column);
+                        if self.player_color == Color::White {
+                            row = 7 - row;
+                        } else {
+                            column = 7 - column;
+                        }
                         let idx = row * 8 + column;
                         let curr_square = Square::new(idx);
                         self.draw_square(curr_square, ctx, ui)

@@ -8,7 +8,7 @@ use shakmaty::Color;
 use tokio::sync::mpsc;
 
 use anyhow::Result;
-use egui::{Align2, Grid};
+use egui::{Align2, Grid, Image, ImageButton, Label};
 use requests::RequestLoopComm;
 use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant};
 
@@ -18,6 +18,7 @@ mod requests;
 pub struct App {
     chessboard: chess::ChessBoard,
     game_mode_selection: GameModeSelector,
+    color_selection: Color,
     fetch_engine_data: bool,
     engine_data: EngineData,
     request_loop_sender: mpsc::Sender<requests::RequestLoopComm>,
@@ -55,6 +56,7 @@ impl App {
         Self {
             chessboard: Default::default(),
             game_mode_selection: GameModeSelector::PlayAgainsAI,
+            color_selection: Color::White,
             fetch_engine_data: true,
             engine_data: EngineData::default(),
             request_loop_sender: req_comm_loop,
@@ -112,9 +114,40 @@ impl App {
                     );
                 });
 
+            ui.horizontal(|ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            ImageButton::new(
+                                Image::new(egui::include_image!("../assets/wk.svg"))
+                                    .maintain_aspect_ratio(true)
+                                    .fit_to_exact_size([40f32, 40f32].into()),
+                            )
+                            .selected(self.color_selection == Color::White),
+                        )
+                        .clicked()
+                    {
+                        self.color_selection = Color::White;
+                    }
+                    if ui
+                        .add(
+                            ImageButton::new(
+                                Image::new(egui::include_image!("../assets/bk.svg"))
+                                    .maintain_aspect_ratio(true)
+                                    .fit_to_exact_size([40f32, 40f32].into()),
+                            )
+                            .selected(self.color_selection == Color::Black),
+                        )
+                        .clicked()
+                    {
+                        self.color_selection = Color::Black;
+                    }
+                })
+            });
+
             if self.game_mode_selection == GameModeSelector::PlayAgainsYourself {
                 self.chessboard
-                    .configure_game(Color::Black, GameMode::PlayAgainsYourself);
+                    .configure_game(self.color_selection, GameMode::PlayAgainsYourself);
             } else {
                 ui.heading("Select engine");
                 if ui.button("Update info").clicked() {
@@ -223,17 +256,16 @@ impl App {
                 info!("Starting game!");
                 if let Some(variant) = &self.engine_data.variant {
                     self.chessboard.configure_game(
-                        Color::Black,
+                        self.color_selection,
                         GameMode::PlayAgainsAI(AiGameSettings::new(
                             variant.clone(),
                             self.request_loop_sender.clone(),
                         )),
                     );
-
-                    self.chessboard.start_game();
                 } else {
                     warn!("Tried to start game without any AI variant");
                 }
+                self.chessboard.start_game();
             }
         });
     }
