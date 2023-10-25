@@ -1,14 +1,13 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 use chess::ChessBoard;
-use shakmaty::{fen::Fen, Color};
+use shakmaty::Color;
 use tokio::sync::mpsc;
 
 use anyhow::Result;
 use egui::{Align2, Grid};
-use poll_promise::Promise;
 use requests::RequestLoopComm;
-use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant, GameMoveResponse};
+use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant};
 
 mod chess;
 mod requests;
@@ -31,8 +30,8 @@ struct EngineData {
 }
 
 impl App {
-    pub fn new(_: &eframe::CreationContext<'_>) -> Self {
-        let req_comm_loop = requests::run_request_loop();
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let req_comm_loop = requests::run_request_loop(cc.egui_ctx.clone());
 
         Self {
             chessboard: Default::default(),
@@ -90,7 +89,6 @@ impl eframe::App for App {
                 if let Ok(Ok(engines)) = recv.try_recv() {
                     self.engine_data.available_engines = Some(engines.clone());
                     self.engine_data.selected_engine = Some(engines.engines[0].clone());
-                    ctx.request_repaint();
                 }
             }
             if let Some(data) = self.engine_data.selected_engine.as_mut() {
@@ -137,7 +135,6 @@ impl eframe::App for App {
                 if let Some(recv) = &self.engine_desc_receiver {
                     if let Ok(Ok(desc)) = recv.try_recv() {
                         self.engine_data.desc = Some(desc.clone());
-                        ctx.request_repaint();
                     }
                 }
                 if let Some(desc) = &mut self.engine_data.desc {

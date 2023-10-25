@@ -1,4 +1,5 @@
-use tokio::sync::mpsc::{self, Sender};
+use egui::Context;
+use tokio::sync::mpsc;
 
 use anyhow::Result;
 use poll_promise::Promise;
@@ -16,7 +17,7 @@ pub enum RequestLoopComm {
     ),
 }
 
-pub fn run_request_loop() -> mpsc::UnboundedSender<RequestLoopComm> {
+pub fn run_request_loop(ctx: Context) -> mpsc::UnboundedSender<RequestLoopComm> {
     let (request_sender, mut request_receiver) = mpsc::unbounded_channel::<RequestLoopComm>();
     let _ = Promise::spawn_local(async move {
         while let Some(comm) = request_receiver.recv().await {
@@ -39,6 +40,7 @@ pub fn run_request_loop() -> mpsc::UnboundedSender<RequestLoopComm> {
                     let _ = response_sender.send(resp);
                 }
             }
+            ctx.request_repaint();
         }
     });
     request_sender

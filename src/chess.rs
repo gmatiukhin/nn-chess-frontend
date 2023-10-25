@@ -119,44 +119,9 @@ impl ChessBoard {
             color
         };
 
-        enum SquareContent {
-            HasPiece(Piece),
-            Empty,
-        }
-
-        // Produce square image and figure out if there is a piece on it
-        let (square_img, square_content) = if let Some(piece) = self.chess.board().piece_at(square)
-        {
-            let img = ImageButton::new(load_image_for_piece(ctx, piece).bg_fill(square_color))
-                .frame(false);
-            (img, SquareContent::HasPiece(piece))
-        } else {
-            // Image to be placed on empty squares
-            let texture = ctx.load_texture(
-                "square",
-                egui::ColorImage::new([square_size as usize, square_size as usize], square_color),
-                Default::default(),
-            );
-
-            let img = ImageButton::new(Image::new((texture.id(), texture.size_vec2())))
-                .frame(false)
-                .sense(
-                    if self
-                        .selection
-                        .as_ref()
-                        .is_some_and(|s| s.can_move_to(square))
-                    {
-                        Sense::click()
-                    } else {
-                        Sense {
-                            click: false,
-                            drag: false,
-                            focusable: false,
-                        }
-                    },
-                );
-            (img, SquareContent::Empty)
-        };
+        let piece = self.chess.board().piece_at(square);
+        let img =
+            ImageButton::new(load_image_for_piece(ctx, piece).bg_fill(square_color)).frame(false);
 
         let can_be_moved_to_square = self
             .selection
@@ -164,26 +129,21 @@ impl ChessBoard {
             .and_then(|s| s.legal_moves.iter().position(|m| m.0 == square));
 
         // Perform actions based on the input
-        if ui.add(square_img).clicked() {
-            match square_content {
-                SquareContent::HasPiece(piece) => {
-                    if self.chess.turn() == piece.color && self.player_color == piece.color {
-                        // Selecting own piece
-                        self.selection = Some(PieceSelection::new(piece, square, &self.chess));
-                    } else {
-                        // Attacking opponent's piece
-                        if let Some(idx) = can_be_moved_to_square {
-                            let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
-                            self.play_move(m);
-                        }
-                    }
-                }
-                SquareContent::Empty => {
+        if ui.add(img).clicked() {
+            if let Some(piece) = piece {
+                if self.chess.turn() == piece.color && self.player_color == piece.color {
+                    // Selecting own piece
+                    self.selection = Some(PieceSelection::new(piece, square, &self.chess));
+                } else {
+                    // Attacking opponent's piece
                     if let Some(idx) = can_be_moved_to_square {
                         let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
                         self.play_move(m);
                     }
                 }
+            } else if let Some(idx) = can_be_moved_to_square {
+                let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
+                self.play_move(m);
             }
         }
     }
@@ -209,6 +169,7 @@ impl ChessBoard {
     }
 
     pub fn update(&mut self) {
+        log::info!("a");
         if self.chess.turn() == self.player_color {
             return;
         }
@@ -220,30 +181,28 @@ impl ChessBoard {
                         .to_move(&self.chess)
                         .unwrap(),
                 );
+                self.engine_move_receiver = None;
             }
-        } else {
-            #[allow(clippy::collapsible_else_if)]
-            if let Some(ref variant) = self.ai_variant {
-                log::info!("asking ai to move");
-                let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
-                let (sender, receiver) = oneshot::channel();
-                let req = RequestLoopComm::FetchPosEval(variant.clone(), fen, sender);
-                self.sender
-                    .as_ref()
-                    .unwrap()
-                    .send(req)
-                    .expect("error communicating with request loop");
-                self.engine_move_receiver = Some(receiver);
-            }
+        } else if let Some(ref variant) = self.ai_variant {
+            log::info!("asking ai to move");
+            let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
+            let (sender, receiver) = oneshot::channel();
+            let req = RequestLoopComm::FetchPosEval(variant.clone(), fen, sender);
+            self.sender
+                .as_ref()
+                .unwrap()
+                .send(req)
+                .expect("error communicating with request loop");
+            self.engine_move_receiver = Some(receiver);
         }
     }
 
     pub fn show(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let square_size = square_size(ctx);
+        // let square_size = square_size(ctx);
         egui::Grid::new("chess_board")
-            .min_col_width(square_size)
-            .min_row_height(square_size)
-            .max_col_width(square_size)
+            // .min_col_width(square_size)
+            // .min_row_height(square_size)
+            // .max_col_width(square_size)
             .spacing([0f32, 0f32])
             .show(ui, |ui| {
                 for row in 0..8 {

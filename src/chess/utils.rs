@@ -5,24 +5,28 @@ pub fn square_size(ctx: &egui::Context) -> f32 {
     (ctx.screen_rect().height().min(ctx.screen_rect().width()) / 8f32).min(80f32)
 }
 
-pub fn load_image_for_piece(ctx: &egui::Context, piece: Piece) -> Image<'static> {
-    let img = match piece.color {
-        shakmaty::Color::Black => match piece.role {
-            shakmaty::Role::Pawn => Image::new(egui::include_image!("../../assets/bp.svg")),
-            shakmaty::Role::Knight => Image::new(egui::include_image!("../../assets/bn.svg")),
-            shakmaty::Role::Bishop => Image::new(egui::include_image!("../../assets/bb.svg")),
-            shakmaty::Role::Rook => Image::new(egui::include_image!("../../assets/br.svg")),
-            shakmaty::Role::Queen => Image::new(egui::include_image!("../../assets/bq.svg")),
-            shakmaty::Role::King => Image::new(egui::include_image!("../../assets/bk.svg")),
-        },
-        shakmaty::Color::White => match piece.role {
-            shakmaty::Role::Pawn => Image::new(egui::include_image!("../../assets/wp.svg")),
-            shakmaty::Role::Knight => Image::new(egui::include_image!("../../assets/wn.svg")),
-            shakmaty::Role::Bishop => Image::new(egui::include_image!("../../assets/wb.svg")),
-            shakmaty::Role::Rook => Image::new(egui::include_image!("../../assets/wr.svg")),
-            shakmaty::Role::Queen => Image::new(egui::include_image!("../../assets/wq.svg")),
-            shakmaty::Role::King => Image::new(egui::include_image!("../../assets/wk.svg")),
-        },
+pub fn load_image_for_piece(ctx: &egui::Context, piece: Option<Piece>) -> Image<'static> {
+    let img = if let Some(piece) = piece {
+        match piece.color {
+            shakmaty::Color::Black => match piece.role {
+                shakmaty::Role::Pawn => Image::new(egui::include_image!("../../assets/bp.svg")),
+                shakmaty::Role::Knight => Image::new(egui::include_image!("../../assets/bn.svg")),
+                shakmaty::Role::Bishop => Image::new(egui::include_image!("../../assets/bb.svg")),
+                shakmaty::Role::Rook => Image::new(egui::include_image!("../../assets/br.svg")),
+                shakmaty::Role::Queen => Image::new(egui::include_image!("../../assets/bq.svg")),
+                shakmaty::Role::King => Image::new(egui::include_image!("../../assets/bk.svg")),
+            },
+            shakmaty::Color::White => match piece.role {
+                shakmaty::Role::Pawn => Image::new(egui::include_image!("../../assets/wp.svg")),
+                shakmaty::Role::Knight => Image::new(egui::include_image!("../../assets/wn.svg")),
+                shakmaty::Role::Bishop => Image::new(egui::include_image!("../../assets/wb.svg")),
+                shakmaty::Role::Rook => Image::new(egui::include_image!("../../assets/wr.svg")),
+                shakmaty::Role::Queen => Image::new(egui::include_image!("../../assets/wq.svg")),
+                shakmaty::Role::King => Image::new(egui::include_image!("../../assets/wk.svg")),
+            },
+        }
+    } else {
+        Image::new(egui::include_image!("../../assets/empty.svg"))
     };
 
     let square_size = square_size(ctx);
