@@ -1,5 +1,4 @@
 use egui::{Color32, ImageButton};
-use log::debug;
 use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Piece, Position, Role, Square};
 
 mod utils;
@@ -9,6 +8,28 @@ use utils::*;
 use web_types::{EngineVariant, GameMoveResponse};
 
 use crate::requests::RequestLoopComm;
+
+pub(crate) struct AiGameSettings {
+    pub(crate) engine_move_receiver: Option<oneshot::Receiver<anyhow::Result<GameMoveResponse>>>,
+    pub(crate) ai_variant: EngineVariant,
+    pub(crate) sender: mpsc::UnboundedSender<crate::requests::RequestLoopComm>,
+}
+
+pub(crate) enum GameMode {
+    PlayAgainsAI(AiGameSettings),
+    PlayAgainsYourself,
+}
+
+impl PartialEq for GameMode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (GameMode::PlayAgainsAI(_), GameMode::PlayAgainsAI(_)) => true,
+            (GameMode::PlayAgainsAI(_), GameMode::PlayAgainsYourself) => false,
+            (GameMode::PlayAgainsYourself, GameMode::PlayAgainsAI(_)) => false,
+            (GameMode::PlayAgainsYourself, GameMode::PlayAgainsYourself) => true,
+        }
+    }
+}
 
 struct PieceSelection {
     piece: Piece,
@@ -49,14 +70,13 @@ struct LastMove {
     b: Square,
 }
 
-pub struct ChessBoard {
+pub(crate) struct ChessBoard {
     chess: Chess,
     player_color: Color,
+    game_mode: GameMode,
     selection: Option<PieceSelection>,
     last_move: Option<LastMove>,
-    engine_move_receiver: Option<oneshot::Receiver<anyhow::Result<GameMoveResponse>>>,
-    ai_variant: Option<EngineVariant>,
-    sender: Option<mpsc::UnboundedSender<crate::requests::RequestLoopComm>>,
+    game_started: bool,
 }
 
 impl Default for ChessBoard {
@@ -64,27 +84,91 @@ impl Default for ChessBoard {
         Self {
             chess: Chess::default(),
             player_color: Color::Black,
+            game_mode: GameMode::PlayAgainsYourself,
             selection: None,
             last_move: None,
-            engine_move_receiver: None,
-            ai_variant: None,
-            sender: None,
+            game_started: false,
         }
     }
 }
 
 impl ChessBoard {
-    pub fn new(
-        player_color: Color,
-        ai_variant: EngineVariant,
-        sender: mpsc::UnboundedSender<crate::requests::RequestLoopComm>,
-    ) -> Self {
-        Self {
-            player_color,
-            ai_variant: Some(ai_variant),
-            sender: Some(sender),
-            ..Default::default()
+    pub(crate) fn configure_game(&mut self, player_color: Color, game_mode: GameMode) {
+        self.player_color = player_color;
+        self.game_mode = game_mode;
+    }
+    pub(crate) fn start_game(&mut self) {
+        self.game_started = true;
+    }
+
+    fn play_move(&mut self, m: &Move) {
+        // We can use `play_unchecked` because only the legal
+        // squares ever become interactable
+        self.chess.play_unchecked(m);
+        log::debug!("Move played: {m:?}");
+        self.last_move = Some(if let Move::Castle { king, rook } = m {
+            LastMove {
+                a: *king,
+                b: Square::from_coords(m.castling_side().unwrap().rook_to_file(), king.rank()),
+            }
+        } else {
+            LastMove {
+                a: m.from().unwrap(),
+                b: m.to(),
+            }
+        });
+        self.selection = None;
+    }
+
+    pub fn update_ai_move(&mut self) {
+        if self.chess.turn() == self.player_color
+            || self.game_mode == GameMode::PlayAgainsYourself
+            || !self.game_started
+        {
+            return;
         }
+        if let GameMode::PlayAgainsAI(ref mut ai_game_settings) = self.game_mode {
+            log::info!("a");
+            if let Some(ref move_receiver) = ai_game_settings.engine_move_receiver {
+                log::info!("b");
+                if let Ok(Ok(m)) = move_receiver.try_recv() {
+                    log::info!("c");
+                    ai_game_settings.engine_move_receiver = None;
+                    self.play_move(
+                        &San::from_ascii(m.move_san.as_bytes())
+                            .unwrap()
+                            .to_move(&self.chess)
+                            .unwrap(),
+                    );
+                }
+            } else {
+                log::info!("d");
+                let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
+                let (sender, receiver) = oneshot::channel();
+                let req =
+                    RequestLoopComm::FetchPosEval(ai_game_settings.ai_variant.clone(), fen, sender);
+                ai_game_settings
+                    .sender
+                    .send(req)
+                    .expect("error communicating with request loop");
+                ai_game_settings.engine_move_receiver = Some(receiver);
+            }
+        }
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        egui::Grid::new("chess_board")
+            .spacing([0f32, 0f32])
+            .show(ui, |ui| {
+                for row in 0..8 {
+                    for column in 0..8 {
+                        let idx = row * 8 + column;
+                        let curr_square = Square::new(idx);
+                        self.draw_square(curr_square, ctx, ui)
+                    }
+                    ui.end_row();
+                }
+            });
     }
 
     fn draw_square(&mut self, square: Square, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -162,7 +246,10 @@ impl ChessBoard {
         // Perform actions based on the input
         if ui.add(img).clicked() {
             if let Some(piece) = piece {
-                if self.chess.turn() == piece.color && self.player_color == piece.color {
+                if self.chess.turn() == piece.color
+                    && (self.player_color == piece.color
+                        || self.game_mode == GameMode::PlayAgainsYourself)
+                {
                     // Selecting own piece
                     self.selection = Some(PieceSelection::new(piece, square, &self.chess));
                 } else {
@@ -177,71 +264,5 @@ impl ChessBoard {
                 self.play_move(m);
             }
         }
-    }
-
-    fn play_move(&mut self, m: &Move) {
-        // We can use `play_unchecked` because only the legal
-        // squares ever become interactable
-        self.chess.play_unchecked(m);
-        debug!("Move played: {m:?}");
-        self.last_move = Some(if let Move::Castle { king, rook } = m {
-            LastMove {
-                a: *king,
-                b: Square::from_coords(m.castling_side().unwrap().rook_to_file(), king.rank()),
-            }
-        } else {
-            LastMove {
-                a: m.from().unwrap(),
-                b: m.to(),
-            }
-        });
-        self.selection = None;
-    }
-
-    pub fn update(&mut self) {
-        if self.chess.turn() == self.player_color {
-            return;
-        }
-        if let Some(move_receiver) = &self.engine_move_receiver {
-            if let Ok(Ok(m)) = move_receiver.try_recv() {
-                self.play_move(
-                    &San::from_ascii(m.move_san.as_bytes())
-                        .unwrap()
-                        .to_move(&self.chess)
-                        .unwrap(),
-                );
-                self.engine_move_receiver = None;
-            }
-        } else if let Some(ref variant) = self.ai_variant {
-            log::info!("asking ai to move");
-            let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
-            let (sender, receiver) = oneshot::channel();
-            let req = RequestLoopComm::FetchPosEval(variant.clone(), fen, sender);
-            self.sender
-                .as_ref()
-                .unwrap()
-                .send(req)
-                .expect("error communicating with request loop");
-            self.engine_move_receiver = Some(receiver);
-        }
-    }
-
-    pub fn show(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        // let square_size = square_size(ctx);
-        egui::Grid::new("chess_board")
-            // .min_col_width(square_size)
-            // .min_row_height(square_size)
-            // .max_col_width(square_size)
-            .spacing([0f32, 0f32])
-            .show(ui, |ui| {
-                for row in 0..8 {
-                    for column in 0..8 {
-                        let idx = row * 8 + column;
-                        let curr_square = Square::new(idx);
-                        self.draw_square(curr_square, ctx, ui)
-                    }
-                    ui.end_row();
-                }
-            });
     }
 }
