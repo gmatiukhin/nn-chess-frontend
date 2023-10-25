@@ -1,5 +1,6 @@
-use egui::{Image, ImageButton, Sense};
-use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Piece, Position, Square};
+use egui::{Color32, ImageButton};
+use log::debug;
+use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Piece, Position, Role, Square};
 
 mod utils;
 
@@ -120,8 +121,38 @@ impl ChessBoard {
         };
 
         let piece = self.chess.board().piece_at(square);
-        let img =
-            ImageButton::new(load_image_for_piece(ctx, piece).bg_fill(square_color)).frame(false);
+        let who_checkmated = self.chess.is_checkmate().then_some(self.chess.turn());
+        let check_tint = if let Some(p) = piece {
+            // First, the square must contain a piece.
+            if let Piece {
+                color,
+                role: Role::King,
+            } = p
+            {
+                // If this piece is a king, and it is attacked
+                if self
+                    .chess
+                    .board()
+                    .attacks_to(square, color.other(), self.chess.board().occupied())
+                    .any()
+                {
+                    // Then tint it
+                    PieceTint::IN_CHECK
+                } else {
+                    Color32::WHITE
+                }
+            } else {
+                Color32::WHITE
+            }
+        } else {
+            Color32::WHITE
+        };
+        let img = ImageButton::new(
+            load_image_for_piece(ctx, piece, who_checkmated)
+                .tint(check_tint)
+                .bg_fill(square_color),
+        )
+        .frame(false);
 
         let can_be_moved_to_square = self
             .selection
@@ -152,13 +183,12 @@ impl ChessBoard {
         // We can use `play_unchecked` because only the legal
         // squares ever become interactable
         self.chess.play_unchecked(m);
-        self.last_move = Some(if m.is_castle() {
-            m.castling_side()
-                .map(|s| LastMove {
-                    a: s.king_to(self.selection.as_ref().unwrap().piece.color),
-                    b: s.rook_to(self.selection.as_ref().unwrap().piece.color),
-                })
-                .unwrap()
+        debug!("Move played: {m:?}");
+        self.last_move = Some(if let Move::Castle { king, rook } = m {
+            LastMove {
+                a: *king,
+                b: Square::from_coords(m.castling_side().unwrap().rook_to_file(), king.rank()),
+            }
         } else {
             LastMove {
                 a: m.from().unwrap(),
@@ -169,7 +199,6 @@ impl ChessBoard {
     }
 
     pub fn update(&mut self) {
-        log::info!("a");
         if self.chess.turn() == self.player_color {
             return;
         }

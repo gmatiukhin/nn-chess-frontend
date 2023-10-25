@@ -1,0 +1,63 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  namespace: unchessful
+  name: unchessful-front
+  labels:
+    app: unchessful-front
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: unchessful-front
+  template:
+    metadata:
+      labels:
+        app: unchessful-front
+    spec:
+      containers:
+        - name: web
+          image: registry.danya02.ru/unchessful/front:latest
+          imagePullPolicy: Always
+          ports:
+            - name: web
+              containerPort: 80
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: unchessful-front-service
+  namespace: unchessful
+
+spec:
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+
+  selector:
+    app: unchessful-front
+
+---
+
+# Traefik-specific ingress, can configure custom Traefik props
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: unchessful-front-ingressroute
+  namespace: unchessful
+
+spec:
+  tls:
+    domains:
+      - main: unchessful.games
+  entryPoints:
+    - websecure
+  routes:
+  - match: Host(`unchessful.games`)
+    kind: Rule
+    services:
+    - name: unchessful-front-service
+      port: web
