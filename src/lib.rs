@@ -1,12 +1,14 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
+use chess::ChessBoard;
+use shakmaty::{fen::Fen, Color};
 use tokio::sync::mpsc;
 
 use anyhow::Result;
 use egui::{Align2, Grid};
 use poll_promise::Promise;
 use requests::RequestLoopComm;
-use web_types::{EngineDescription, EngineDirectory, EngineRef, GameMoveResponse};
+use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant, GameMoveResponse};
 
 mod chess;
 mod requests;
@@ -18,7 +20,6 @@ pub struct App {
     sender: mpsc::UnboundedSender<requests::RequestLoopComm>,
     engine_dir_receiver: Option<oneshot::Receiver<Result<EngineDirectory>>>,
     engine_desc_receiver: Option<oneshot::Receiver<Result<EngineDescription>>>,
-    engine_move_receiver: Option<oneshot::Receiver<Result<GameMoveResponse>>>,
 }
 
 #[derive(Default)]
@@ -26,6 +27,7 @@ struct EngineData {
     available_engines: Option<EngineDirectory>,
     selected_engine: Option<EngineRef>,
     desc: Option<EngineDescription>,
+    variant: Option<EngineVariant>,
 }
 
 impl App {
@@ -39,7 +41,6 @@ impl App {
             sender: req_comm_loop,
             engine_desc_receiver: None,
             engine_dir_receiver: None,
-            engine_move_receiver: None,
         }
     }
 }
@@ -89,10 +90,7 @@ impl eframe::App for App {
                 if let Ok(Ok(engines)) = recv.try_recv() {
                     self.engine_data.available_engines = Some(engines.clone());
                     self.engine_data.selected_engine = Some(engines.engines[0].clone());
-                    log::info!(
-                        "{:?}",
-                        self.engine_data.selected_engine.as_ref().unwrap().name
-                    );
+                    ctx.request_repaint();
                 }
             }
             if let Some(data) = self.engine_data.selected_engine.as_mut() {
@@ -139,6 +137,7 @@ impl eframe::App for App {
                 if let Some(recv) = &self.engine_desc_receiver {
                     if let Ok(Ok(desc)) = recv.try_recv() {
                         self.engine_data.desc = Some(desc.clone());
+                        ctx.request_repaint();
                     }
                 }
                 if let Some(desc) = &mut self.engine_data.desc {
@@ -157,6 +156,13 @@ impl eframe::App for App {
                                 );
                             }
                         });
+                    self.engine_data.variant = Some(checkpoint.clone());
+                }
+            }
+            if let Some(variant) = &self.engine_data.variant {
+                if ui.button("Play").clicked() {
+                    self.chessboard =
+                        ChessBoard::new(Color::Black, variant.clone(), self.sender.clone())
                 }
             }
         });
@@ -164,7 +170,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             // The central panel the region left after adding TopPanel's and SidePanel's
             ui.heading("Unchessful Games");
-
+            self.chessboard.update();
             egui::Area::new("board_area")
                 .anchor(Align2::CENTER_CENTER, [0f32, 0f32])
                 .movable(false)

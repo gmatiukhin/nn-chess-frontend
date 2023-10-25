@@ -33,6 +33,7 @@ pub fn run_request_loop() -> mpsc::UnboundedSender<RequestLoopComm> {
                     let _ = response_sender.send(resp);
                 }
                 RequestLoopComm::FetchPosEval(engine_variant, fen, response_sender) => {
+                    log::info!("fetching pos");
                     let resp = get_position_evaluation(engine_variant.clone(), fen.clone()).await;
                     log::info!("Received game move result: {resp:?}");
                     let _ = response_sender.send(resp);

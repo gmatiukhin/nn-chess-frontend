@@ -1,9 +1,13 @@
 use egui::{Image, ImageButton, Sense};
-use shakmaty::{Chess, Color, Move, Piece, Position, Square};
+use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Piece, Position, Square};
 
 mod utils;
 
+use tokio::sync::mpsc;
 use utils::*;
+use web_types::{EngineVariant, GameMoveResponse};
+
+use crate::requests::RequestLoopComm;
 
 struct PieceSelection {
     piece: Piece,
@@ -49,6 +53,9 @@ pub struct ChessBoard {
     player_color: Color,
     selection: Option<PieceSelection>,
     last_move: Option<LastMove>,
+    engine_move_receiver: Option<oneshot::Receiver<anyhow::Result<GameMoveResponse>>>,
+    ai_variant: Option<EngineVariant>,
+    sender: Option<mpsc::UnboundedSender<crate::requests::RequestLoopComm>>,
 }
 
 impl Default for ChessBoard {
@@ -58,16 +65,176 @@ impl Default for ChessBoard {
             player_color: Color::Black,
             selection: None,
             last_move: None,
+            engine_move_receiver: None,
+            ai_variant: None,
+            sender: None,
         }
     }
 }
 
 impl ChessBoard {
-    pub fn new(chess: Chess, player_color: Color) -> Self {
+    pub fn new(
+        player_color: Color,
+        ai_variant: EngineVariant,
+        sender: mpsc::UnboundedSender<crate::requests::RequestLoopComm>,
+    ) -> Self {
         Self {
-            chess,
             player_color,
+            ai_variant: Some(ai_variant),
+            sender: Some(sender),
             ..Default::default()
+        }
+    }
+
+    fn draw_square(&mut self, square: Square, ctx: &egui::Context, ui: &mut egui::Ui) {
+        // Figure out the color of the current square
+        let square_color = {
+            let mut color = if Some(square) == self.last_move.as_ref().map(|s| s.a)
+                || Some(square) == self.last_move.as_ref().map(|s| s.b)
+            {
+                SquareColor::LAST_MOVE
+            } else if square.is_dark() {
+                SquareColor::DARK
+            } else {
+                // if square.is_light()
+                SquareColor::LIGHT
+            };
+
+            if self.selection.is_some() {
+                let selection = self.selection.as_ref().unwrap();
+                if square == selection.position {
+                    color = SquareColor::SELECTED
+                } else if let Some(square_idx) =
+                    selection.legal_moves.iter().position(|v| v.0 == square)
+                {
+                    color = if selection.legal_moves[square_idx].1.is_capture()
+                        || selection.legal_moves[square_idx].1.is_en_passant()
+                    {
+                        SquareColor::ATTACK_TARGET
+                    } else {
+                        SquareColor::MOVE_TARGET
+                    }
+                }
+            }
+            color
+        };
+
+        enum SquareContent {
+            HasPiece(Piece),
+            Empty,
+        }
+
+        // Produce square image and figure out if there is a piece on it
+        let (square_img, square_content) = if let Some(piece) = self.chess.board().piece_at(square)
+        {
+            let img = ImageButton::new(load_image_for_piece(ctx, piece).bg_fill(square_color))
+                .frame(false);
+            (img, SquareContent::HasPiece(piece))
+        } else {
+            // Image to be placed on empty squares
+            let texture = ctx.load_texture(
+                "square",
+                egui::ColorImage::new([square_size as usize, square_size as usize], square_color),
+                Default::default(),
+            );
+
+            let img = ImageButton::new(Image::new((texture.id(), texture.size_vec2())))
+                .frame(false)
+                .sense(
+                    if self
+                        .selection
+                        .as_ref()
+                        .is_some_and(|s| s.can_move_to(square))
+                    {
+                        Sense::click()
+                    } else {
+                        Sense {
+                            click: false,
+                            drag: false,
+                            focusable: false,
+                        }
+                    },
+                );
+            (img, SquareContent::Empty)
+        };
+
+        let can_be_moved_to_square = self
+            .selection
+            .as_ref()
+            .and_then(|s| s.legal_moves.iter().position(|m| m.0 == square));
+
+        // Perform actions based on the input
+        if ui.add(square_img).clicked() {
+            match square_content {
+                SquareContent::HasPiece(piece) => {
+                    if self.chess.turn() == piece.color && self.player_color == piece.color {
+                        // Selecting own piece
+                        self.selection = Some(PieceSelection::new(piece, square, &self.chess));
+                    } else {
+                        // Attacking opponent's piece
+                        if let Some(idx) = can_be_moved_to_square {
+                            let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
+                            self.play_move(m);
+                        }
+                    }
+                }
+                SquareContent::Empty => {
+                    if let Some(idx) = can_be_moved_to_square {
+                        let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
+                        self.play_move(m);
+                    }
+                }
+            }
+        }
+    }
+
+    fn play_move(&mut self, m: &Move) {
+        // We can use `play_unchecked` because only the legal
+        // squares ever become interactable
+        self.chess.play_unchecked(m);
+        self.last_move = Some(if m.is_castle() {
+            m.castling_side()
+                .map(|s| LastMove {
+                    a: s.king_to(self.selection.as_ref().unwrap().piece.color),
+                    b: s.rook_to(self.selection.as_ref().unwrap().piece.color),
+                })
+                .unwrap()
+        } else {
+            LastMove {
+                a: m.from().unwrap(),
+                b: m.to(),
+            }
+        });
+        self.selection = None;
+    }
+
+    pub fn update(&mut self) {
+        if self.chess.turn() == self.player_color {
+            return;
+        }
+        if let Some(move_receiver) = &self.engine_move_receiver {
+            if let Ok(Ok(m)) = move_receiver.try_recv() {
+                self.play_move(
+                    &San::from_ascii(m.move_san.as_bytes())
+                        .unwrap()
+                        .to_move(&self.chess)
+                        .unwrap(),
+                );
+            }
+        } else {
+            #[allow(clippy::collapsible_else_if)]
+            if let Some(ref variant) = self.ai_variant {
+                log::info!("asking ai to move");
+                let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
+                let (sender, receiver) = oneshot::channel();
+                let req = RequestLoopComm::FetchPosEval(variant.clone(), fen, sender);
+                self.sender
+                    .as_ref()
+                    .unwrap()
+                    .send(req)
+                    .expect("error communicating with request loop");
+                self.engine_move_receiver = Some(receiver);
+            }
         }
     }
 
@@ -83,158 +250,7 @@ impl ChessBoard {
                     for column in 0..8 {
                         let idx = row * 8 + column;
                         let curr_square = Square::new(idx);
-
-                        // Figure out the color of the current square
-                        let square_color = {
-                            let mut color = if Some(curr_square)
-                                == self.last_move.as_ref().map(|s| s.a)
-                                || Some(curr_square) == self.last_move.as_ref().map(|s| s.b)
-                            {
-                                SquareColor::LAST_MOVE
-                            } else if curr_square.is_dark() {
-                                SquareColor::DARK
-                            } else {
-                                // if curr_square.is_light()
-                                SquareColor::LIGHT
-                            };
-
-                            if self.selection.is_some() {
-                                let selection = self.selection.as_ref().unwrap();
-                                if curr_square == selection.position {
-                                    color = SquareColor::SELECTED
-                                } else if let Some(square_idx) = selection
-                                    .legal_moves
-                                    .iter()
-                                    .position(|v| v.0 == curr_square)
-                                {
-                                    color = if selection.legal_moves[square_idx].1.is_capture()
-                                        || selection.legal_moves[square_idx].1.is_en_passant()
-                                    {
-                                        SquareColor::ATTACK_TARGET
-                                    } else {
-                                        SquareColor::MOVE_TARGET
-                                    }
-                                }
-                            }
-                            color
-                        };
-
-                        enum SquareContent {
-                            HasPiece(Piece),
-                            Empty,
-                        }
-
-                        // Produce square image and figure out if there is a piece on it
-                        let (square_img, square_content) = if let Some(piece) =
-                            self.chess.board().piece_at(curr_square)
-                        {
-                            let img = ImageButton::new(
-                                load_image_for_piece(ctx, piece).bg_fill(square_color),
-                            )
-                            .frame(false);
-                            (img, SquareContent::HasPiece(piece))
-                        } else {
-                            // Image to be placed on empty squares
-                            let texture = ctx.load_texture(
-                                "square",
-                                egui::ColorImage::new(
-                                    [square_size as usize, square_size as usize],
-                                    square_color,
-                                ),
-                                Default::default(),
-                            );
-
-                            let img =
-                                ImageButton::new(Image::new((texture.id(), texture.size_vec2())))
-                                    .frame(false)
-                                    .sense(
-                                        if self
-                                            .selection
-                                            .as_ref()
-                                            .is_some_and(|s| s.can_move_to(curr_square))
-                                        {
-                                            Sense::click()
-                                        } else {
-                                            Sense {
-                                                click: false,
-                                                drag: false,
-                                                focusable: false,
-                                            }
-                                        },
-                                    );
-                            (img, SquareContent::Empty)
-                        };
-
-                        let can_be_moved_to_square = self
-                            .selection
-                            .as_ref()
-                            .and_then(|s| s.legal_moves.iter().position(|m| m.0 == curr_square));
-
-                        // Perform actions based on the input
-                        if ui.add(square_img).clicked() {
-                            match square_content {
-                                SquareContent::HasPiece(piece) => {
-                                    if self.chess.turn() == piece.color
-                                        && self.player_color == piece.color
-                                    {
-                                        // Selecting own piece
-                                        self.selection = Some(PieceSelection::new(
-                                            piece,
-                                            curr_square,
-                                            &self.chess,
-                                        ));
-                                    } else {
-                                        // Attacking opponent's piece
-                                        if let Some(idx) = can_be_moved_to_square {
-                                            let m = &self.selection.as_ref().unwrap().legal_moves
-                                                [idx]
-                                                .1;
-                                            // We can use `play_unchecked` because only the legal
-                                            // squares ever become interactable
-                                            self.chess.play_unchecked(m);
-                                            self.last_move = Some(LastMove {
-                                                a: m.from().unwrap(),
-                                                b: m.to(),
-                                            });
-                                            self.selection = None;
-                                        }
-                                    }
-                                }
-                                SquareContent::Empty => {
-                                    if let Some(idx) = can_be_moved_to_square {
-                                        let m =
-                                            &self.selection.as_ref().unwrap().legal_moves[idx].1;
-                                        self.chess.play_unchecked(m);
-                                        self.last_move = Some(if m.is_castle() {
-                                            m.castling_side()
-                                                .map(|s| LastMove {
-                                                    a: s.king_to(
-                                                        self.selection
-                                                            .as_ref()
-                                                            .unwrap()
-                                                            .piece
-                                                            .color,
-                                                    ),
-                                                    b: s.rook_to(
-                                                        self.selection
-                                                            .as_ref()
-                                                            .unwrap()
-                                                            .piece
-                                                            .color,
-                                                    ),
-                                                })
-                                                .unwrap()
-                                        } else {
-                                            LastMove {
-                                                a: m.from().unwrap(),
-                                                b: m.to(),
-                                            }
-                                        });
-                                        self.selection = None;
-                                    }
-                                }
-                            }
-                        }
+                        self.draw_square(curr_square, ctx, ui)
                     }
                     ui.end_row();
                 }
