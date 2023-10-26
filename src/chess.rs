@@ -1,4 +1,4 @@
-use egui::{Color32, Frame, ImageButton, Pos2};
+use egui::{Align2, Color32, Frame, ImageButton, Pos2};
 use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Outcome, Piece, Position, Role, Square};
 
 mod utils;
@@ -141,7 +141,7 @@ pub(crate) enum Termination {
 
 impl Termination {
     pub fn outcome(&self) -> Outcome {
-        match self.clone() {
+        match *self {
             Termination::Checkmate(c) => Outcome::Decisive { winner: c.other() },
             Termination::Stalemate(_) => Outcome::Draw,
             Termination::InsufficientMaterial => Outcome::Draw,
@@ -161,10 +161,13 @@ impl ChessBoard {
     }
 
     pub fn stop_game(&mut self) {
+        self.promotion.show_promotion_choice = false;
+        self.promotion.promotion_move = None;
+        self.promotion.color = None;
         self.game_is_going = false;
     }
 
-    pub fn last_ai_move_info(&self) -> Option<GameMoveResponse> {
+    pub fn last_ai_move_info(&mut self) -> Option<GameMoveResponse> {
         self.last_ai_move.clone()
     }
 
@@ -382,15 +385,15 @@ impl ChessBoard {
             .and_then(|s| s.legal_moves.iter().position(|m| m.0 == square));
 
         // Perform actions based on the input
-        let resp = ui.add_enabled(
-            self.game_is_going,
-            img.sense(egui::Sense {
-                click: self.game_is_going,
-                drag: false,
-                focusable: self.game_is_going,
-            }),
-        );
-        if resp
+        if ui
+            .add_enabled(
+                self.game_is_going,
+                img.sense(egui::Sense {
+                    click: self.game_is_going,
+                    drag: false,
+                    focusable: self.game_is_going,
+                }),
+            )
             .clone()
             .on_disabled_hover_text(self.why_game_not_running())
             .clicked()
@@ -412,12 +415,6 @@ impl ChessBoard {
                     self.promotion.show_promotion_choice = true;
                     self.promotion.color = Some(self.selection.as_ref().unwrap().piece.color);
                     self.promotion.promotion_move = Some(m);
-                    let rect = resp.rect;
-                    let ctr = rect.center();
-                    self.promotion.promotion_panel_anchor_pos = Pos2::new(
-                        ctr.x - 2.35f32 * rect.width(),
-                        ctr.y - 1.8f32 * rect.height(),
-                    );
                 } else {
                     self.play_move(&m);
                 }
@@ -427,12 +424,12 @@ impl ChessBoard {
         }
         if self.promotion.show_promotion_choice {
             egui::Window::new("Promotion!")
+                .anchor(Align2::CENTER_CENTER, [0f32, 0f32])
                 .title_bar(false)
                 .resizable(false)
                 .collapsible(false)
+                .movable(false)
                 .frame(Frame::default().outer_margin(10f32))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .fixed_pos(self.promotion.promotion_panel_anchor_pos)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = [1f32, 0f32].into();
