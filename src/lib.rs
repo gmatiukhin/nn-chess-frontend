@@ -7,7 +7,7 @@ use shakmaty::Color;
 use tokio::sync::mpsc;
 
 use anyhow::Result;
-use egui::{Align2, Button, Grid, Image, ImageButton};
+use egui::{Align2, Button, Grid, Image, ImageButton, Label};
 use requests::RequestLoopComm;
 use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant};
 
@@ -239,7 +239,7 @@ impl App {
                     });
                 }
 
-                if let Some(_) = &self.engine_data.selected_engine {
+                if self.engine_data.selected_engine.is_some() {
                     ui.heading("Select variant");
                     if ui.button("Update info").clicked() {
                         self.fetch_engine_description();
@@ -260,9 +260,9 @@ impl App {
                     }
                     if let Some(desc) = &mut self.engine_data.desc {
                         ui.heading(desc.name.clone());
-                        ui.label(desc.text_description.clone());
+                        ui.add(Label::new(desc.text_description.clone()).wrap(true));
 
-                        if self.engine_data.variant == None {
+                        if self.engine_data.variant.is_none() {
                             self.engine_data.variant = Some(desc.best_available_variant.clone());
                         }
 
