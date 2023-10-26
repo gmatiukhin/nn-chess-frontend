@@ -74,10 +74,6 @@ impl PieceSelection {
             legal_moves,
         }
     }
-
-    fn can_move_to(&self, square: Square) -> bool {
-        self.legal_moves.iter().any(|v| v.0 == square)
-    }
 }
 
 struct LastMove {
@@ -87,38 +83,32 @@ struct LastMove {
 
 pub(crate) struct ChessBoard {
     chess: Chess,
-    player_color: Color,
-    game_mode: GameMode,
+    pub(crate) player_color: Color,
+    pub(crate) game_mode: GameMode,
     selection: Option<PieceSelection>,
     last_move: Option<LastMove>,
-    game_started: bool,
+    game_is_going: bool,
 }
 
 impl Default for ChessBoard {
     fn default() -> Self {
         Self {
             chess: Chess::default(),
-            player_color: Color::Black,
+            player_color: Color::White,
             game_mode: GameMode::PlayAgainsYourself,
             selection: None,
             last_move: None,
-            game_started: false,
+            game_is_going: false,
         }
     }
 }
 
 impl ChessBoard {
-    pub(crate) fn configure_game(&mut self, player_color: Color, game_mode: GameMode) {
-        self.player_color = player_color;
-        self.game_mode = game_mode;
-    }
     pub(crate) fn start_game(&mut self) {
         self.chess = Chess::default();
-        self.game_started = true;
-    }
-
-    pub fn game_started(&self) -> bool {
-        self.game_started
+        self.selection = None;
+        self.last_move = None;
+        self.game_is_going = true;
     }
 
     fn play_move(&mut self, m: &Move) {
@@ -126,7 +116,7 @@ impl ChessBoard {
         // squares ever become interactable
         self.chess.play_unchecked(m);
         log::debug!("Move played: {m:?}");
-        self.last_move = Some(if let Move::Castle { king, rook } = m {
+        self.last_move = Some(if let Move::Castle { king, .. } = m {
             LastMove {
                 a: *king,
                 b: Square::from_coords(m.castling_side().unwrap().rook_to_file(), king.rank()),
@@ -143,17 +133,13 @@ impl ChessBoard {
     pub fn update_ai_move(&mut self) {
         if self.chess.turn() == self.player_color
             || self.game_mode == GameMode::PlayAgainsYourself
-            || !self.game_started
+            || !self.game_is_going
         {
             return;
         }
         if let GameMode::PlayAgainsAI(ai_game_settings) = &mut self.game_mode {
-            log::info!("a {ai_game_settings:?}");
-
             if let Some(move_receiver) = &ai_game_settings.engine_move_receiver {
-                log::info!("b");
                 if let Ok(Ok(m)) = move_receiver.try_recv() {
-                    log::info!("c");
                     ai_game_settings.engine_move_receiver = None;
                     self.play_move(
                         &San::from_ascii(m.move_san.as_bytes())
@@ -163,7 +149,6 @@ impl ChessBoard {
                     );
                 }
             } else {
-                log::info!("d");
                 let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
                 let (sender, receiver) = oneshot::channel();
                 let req =
@@ -173,7 +158,6 @@ impl ChessBoard {
                     .try_send(req)
                     .expect("error communicating with request loop");
                 ai_game_settings.engine_move_receiver = Some(receiver);
-                log::info!("d {ai_game_settings:?}");
             }
         }
     }
@@ -233,7 +217,10 @@ impl ChessBoard {
         };
 
         let piece = self.chess.board().piece_at(square);
-        let who_checkmated = self.chess.is_checkmate().then_some(self.chess.turn());
+        let who_is_checkmated = self.chess.is_checkmate().then_some(self.chess.turn());
+        if who_is_checkmated.is_some() {
+            self.game_is_going = false;
+        }
         let check_tint = if let Some(p) = piece {
             // First, the square must contain a piece.
             if let Piece {
@@ -260,7 +247,7 @@ impl ChessBoard {
             Color32::WHITE
         };
         let img = ImageButton::new(
-            load_image_for_piece(ctx, piece, who_checkmated)
+            load_image_for_piece(ctx, piece, who_is_checkmated)
                 .tint(check_tint)
                 .bg_fill(square_color),
         )
@@ -272,7 +259,14 @@ impl ChessBoard {
             .and_then(|s| s.legal_moves.iter().position(|m| m.0 == square));
 
         // Perform actions based on the input
-        if ui.add(img).clicked() {
+        if ui
+            .add(img.sense(egui::Sense {
+                click: self.game_is_going,
+                drag: false,
+                focusable: self.game_is_going,
+            }))
+            .clicked()
+        {
             if let Some(piece) = piece {
                 if self.chess.turn() == piece.color
                     && (self.player_color == piece.color
@@ -280,15 +274,15 @@ impl ChessBoard {
                 {
                     // Selecting own piece
                     self.selection = Some(PieceSelection::new(piece, square, &self.chess));
-                } else {
-                    // Attacking opponent's piece
-                    if let Some(idx) = can_be_moved_to_square {
-                        let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
-                        self.play_move(m);
-                    }
+                    return;
                 }
-            } else if let Some(idx) = can_be_moved_to_square {
+            }
+            if let Some(idx) = can_be_moved_to_square {
                 let m = &self.selection.as_ref().unwrap().legal_moves[idx].1.clone();
+                egui::Window::new("My Window").show(ctx, |ui| {
+                    ui.label("Hello World!");
+                    log::info!("windo");
+                });
                 self.play_move(m);
             }
         }
