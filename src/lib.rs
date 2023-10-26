@@ -118,6 +118,7 @@ impl App {
             ui.heading("Game settings");
 
             egui::ComboBox::from_id_source("gamemode_selection")
+                .width(140f32)
                 .selected_text(format!("{}", self.game_mode_selection))
                 .show_ui(ui, |ui| {
                     if ui
