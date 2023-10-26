@@ -289,6 +289,10 @@ impl App {
                             self.engine_data.variant = Some(checkpoint);
                             self.chessboard.stop_game()
                         }
+
+                        if let Some(chk) = &self.engine_data.variant {
+                            ui.label(&chk.description);
+                        }
                     }
                 }
             }
