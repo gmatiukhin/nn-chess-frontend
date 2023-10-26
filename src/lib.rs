@@ -7,7 +7,7 @@ use shakmaty::Color;
 use tokio::sync::mpsc;
 
 use anyhow::Result;
-use egui::{Align2, Button, Grid, Image, ImageButton, Label};
+use egui::{Align2, Button, Grid, Image, ImageButton, Label, RichText, Window};
 use requests::RequestLoopComm;
 use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant};
 
@@ -335,11 +335,38 @@ impl App {
                     ui.label(format!("{:?}", status.move_timing));
                     ui.end_row();
                     ui.label("Info");
-                    ui.label(status.status_text);
+                    ui.add(Label::new(status.status_text).wrap(true));
                     ui.end_row();
                 });
             }
         });
+
+        if let Some(term) = self.chessboard.get_termination() {
+            if self.chessboard.game_over_is_dismissed() {
+                return;
+            }
+            Window::new("game_over_modal")
+                .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+                .movable(false)
+                .title_bar(false)
+                .auto_sized()
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading(
+                            RichText::new(term.outcome().to_string().replace("1/2", "½"))
+                                .size(36.0),
+                        );
+                        ui.label(self.chessboard.why_game_not_running());
+
+                        if ui.add(Button::new("Try again")).clicked() {
+                            self.chessboard.start_game();
+                        }
+                        if ui.add(Button::new("Dismiss")).clicked() {
+                            self.chessboard.dismiss_game_over();
+                        }
+                    })
+                });
+        }
     }
 
     fn update_central_panel(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

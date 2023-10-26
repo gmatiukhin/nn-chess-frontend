@@ -1,5 +1,5 @@
 use egui::{Color32, Frame, ImageButton, Pos2};
-use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Piece, Position, Role, Square};
+use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Outcome, Piece, Position, Role, Square};
 
 mod utils;
 
@@ -97,6 +97,7 @@ pub(crate) struct ChessBoard {
     last_ai_move: Option<GameMoveResponse>,
     promotion: PromotionData,
     game_is_going: bool,
+    game_over_is_dismissed: bool,
 }
 
 impl Default for ChessBoard {
@@ -115,6 +116,36 @@ impl Default for ChessBoard {
                 promotion_move: None,
             },
             game_is_going: false,
+            game_over_is_dismissed: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Termination {
+    /// {color} to move and is in checkmate
+    /// {color} wins
+    Checkmate(Color),
+
+    /// {color} to move and is stalemated
+    /// Draw
+    Stalemate(Color),
+
+    /// Neither side can win because of insufficient material
+    /// Draw
+    InsufficientMaterial,
+
+    /// Unknown type of termination
+    Unknown(Outcome),
+}
+
+impl Termination {
+    pub fn outcome(&self) -> Outcome {
+        match self.clone() {
+            Termination::Checkmate(c) => Outcome::Decisive { winner: c.other() },
+            Termination::Stalemate(_) => Outcome::Draw,
+            Termination::InsufficientMaterial => Outcome::Draw,
+            Termination::Unknown(v) => v,
         }
     }
 }
@@ -126,6 +157,7 @@ impl ChessBoard {
         self.last_move = None;
         self.last_ai_move = None;
         self.game_is_going = true;
+        self.game_over_is_dismissed = false;
     }
 
     pub fn stop_game(&mut self) {
@@ -134,6 +166,25 @@ impl ChessBoard {
 
     pub fn last_ai_move_info(&self) -> Option<GameMoveResponse> {
         self.last_ai_move.clone()
+    }
+
+    pub fn get_termination(&self) -> Option<Termination> {
+        Some(if self.chess.is_insufficient_material() {
+            Termination::InsufficientMaterial
+        } else if self.chess.is_checkmate() {
+            Termination::Checkmate(self.chess.turn())
+        } else if self.chess.is_stalemate() {
+            Termination::Stalemate(self.chess.turn())
+        } else {
+            Termination::Unknown(self.chess.outcome()?)
+        })
+    }
+
+    pub fn game_over_is_dismissed(&self) -> bool {
+        self.game_over_is_dismissed
+    }
+    pub fn dismiss_game_over(&mut self) {
+        self.game_over_is_dismissed = true;
     }
 
     fn play_move(&mut self, m: &Move) {
@@ -223,6 +274,29 @@ impl ChessBoard {
                     ui.end_row();
                 }
             });
+    }
+
+    pub fn why_game_not_running(&self) -> &'static str {
+        if self.chess.is_insufficient_material() {
+            "Draw due to insufficient material"
+        } else if self.chess.is_stalemate() {
+            match self.chess.turn() {
+                Color::Black => "Black to move and is stalemated",
+                Color::White => "White to move and is stalemated",
+            }
+        } else if self.chess.is_checkmate() {
+            match self.chess.turn() {
+                Color::Black => "Black to move and is in checkmate",
+                Color::White => "White to move and is in checkmate",
+            }
+        } else if self.chess.is_game_over() {
+            match self.chess.turn() {
+                Color::Black => "Black to move, but game is over",
+                Color::White => "White to move, but game is over",
+            }
+        } else {
+            "The game has not been started yet, please check the menu."
+        }
     }
 
     fn draw_square(&mut self, square: Square, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -318,7 +392,7 @@ impl ChessBoard {
         );
         if resp
             .clone()
-            .on_disabled_hover_text("The game is not running; please start it in the menu")
+            .on_disabled_hover_text(self.why_game_not_running())
             .clicked()
             && !self.promotion.show_promotion_choice
         {
