@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, Frame, ImageButton, Pos2};
+use egui::{Align2, Color32, Context, Frame, ImageButton, Pos2, Ui};
 use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Outcome, Piece, Position, Role, Square};
 
 mod utils;
@@ -262,16 +262,40 @@ impl ChessBoard {
         egui::Grid::new("chess_board")
             .spacing([0f32, 0f32])
             .show(ui, |ui| {
-                for row in 0..8 {
-                    for column in 0..8 {
+                let letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+                for row in 0..10 {
+                    for column in 0..10 {
+                        if (row == 0 || row == 9) && (column == 0 || column == 9) {
+                            ui.label("");
+                            continue;
+                        }
+
                         let (mut row, mut column) = (row, column);
                         if self.player_color == Color::White {
-                            row = 7 - row;
+                            row = 9 - row;
                         } else {
-                            column = 7 - column;
+                            column = 9 - column;
                         }
-                        let idx = row * 8 + column;
-                        let curr_square = Square::new(idx);
+
+                        if row == 0 || row == 9 {
+                            // ui.label(letters[column - 1]);
+                            ui.add(load_image_for_board_labels(
+                                ctx,
+                                AlphaNum::Alpha(letters[column - 1]),
+                            ));
+                            continue;
+                        }
+
+                        if column == 0 || column == 9 {
+                            // ui.label(numbers[row - 1].to_string());
+                            ui.add(load_image_for_board_labels(ctx, AlphaNum::Num(row)));
+                            continue;
+                        }
+
+                        row -= 1;
+                        column -= 1;
+                        let idx = row * 8 + column as u8;
+                        let curr_square = Square::new(idx as u32);
                         self.draw_square(curr_square, ctx, ui)
                     }
                     ui.end_row();
@@ -387,7 +411,7 @@ impl ChessBoard {
         // Perform actions based on the input
         if ui
             .add_enabled(
-                self.game_is_going,
+                self.game_is_going && !self.promotion.show_promotion_choice,
                 img.sense(egui::Sense {
                     click: self.game_is_going,
                     drag: false,
@@ -423,44 +447,47 @@ impl ChessBoard {
             }
         }
         if self.promotion.show_promotion_choice {
-            egui::Window::new("Promotion!")
-                .anchor(Align2::CENTER_CENTER, [0f32, 0f32])
-                .title_bar(false)
-                .resizable(false)
-                .collapsible(false)
-                .movable(false)
-                .frame(Frame::default().outer_margin(10f32))
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = [1f32, 0f32].into();
-                        for role in [Role::Queen, Role::Rook, Role::Bishop, Role::Knight] {
-                            let piece = Piece {
-                                color: self.promotion.color.unwrap(),
-                                role,
-                            };
-                            if ui
-                                .add(ImageButton::new(
-                                    load_image_for_piece(ctx, Some(piece), None).fit_to_exact_size(
-                                        [square_size(ctx), square_size(ctx)].into(),
-                                    ),
-                                ))
-                                .clicked()
-                            {
-                                self.promotion.show_promotion_choice = false;
-                                if let Some(m) = &self.promotion.promotion_move {
-                                    let m = Move::Normal {
-                                        role: m.role(),
-                                        from: m.from().unwrap(),
-                                        capture: m.capture(),
-                                        to: m.to(),
-                                        promotion: Some(role),
-                                    };
-                                    self.play_move(&m);
-                                }
+            self.show_promotion_selection_modal(ctx);
+        }
+    }
+
+    fn show_promotion_selection_modal(&mut self, ctx: &Context) {
+        egui::Window::new("Promotion!")
+            .anchor(Align2::CENTER_CENTER, [0f32, 0f32])
+            .title_bar(false)
+            .resizable(false)
+            .collapsible(false)
+            .movable(false)
+            .frame(Frame::default().outer_margin(10f32))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = [1f32, 0f32].into();
+                    for role in [Role::Queen, Role::Rook, Role::Bishop, Role::Knight] {
+                        let piece = Piece {
+                            color: self.promotion.color.unwrap(),
+                            role,
+                        };
+                        if ui
+                            .add(ImageButton::new(
+                                load_image_for_piece(ctx, Some(piece), None)
+                                    .fit_to_exact_size([square_size(ctx), square_size(ctx)].into()),
+                            ))
+                            .clicked()
+                        {
+                            self.promotion.show_promotion_choice = false;
+                            if let Some(m) = &self.promotion.promotion_move {
+                                let m = Move::Normal {
+                                    role: m.role(),
+                                    from: m.from().unwrap(),
+                                    capture: m.capture(),
+                                    to: m.to(),
+                                    promotion: Some(role),
+                                };
+                                self.play_move(&m);
                             }
                         }
-                    })
-                });
-        }
+                    }
+                })
+            });
     }
 }

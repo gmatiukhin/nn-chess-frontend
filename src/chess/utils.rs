@@ -5,7 +5,53 @@ pub fn square_size(ctx: &egui::Context) -> f32 {
     (ctx.screen_rect().height().min(ctx.screen_rect().width()) / 8f32).min(80f32)
 }
 
-pub fn load_image_for_piece(
+pub(super) enum AlphaNum {
+    Alpha(char),
+    Num(u8),
+}
+
+pub(super) fn load_image_for_board_labels(
+    ctx: &egui::Context,
+    alpha_num: AlphaNum,
+) -> Image<'static> {
+    let img = match alpha_num {
+        AlphaNum::Alpha(l) => match l {
+            'a' => Image::new(egui::include_image!("../../assets/wk.svg")),
+            'b' => Image::new(egui::include_image!("../../assets/b.svg")),
+            'c' => Image::new(egui::include_image!("../../assets/c.svg")),
+            'd' => Image::new(egui::include_image!("../../assets/d.svg")),
+            'e' => Image::new(egui::include_image!("../../assets/e.svg")),
+            'f' => Image::new(egui::include_image!("../../assets/f.svg")),
+            'g' => Image::new(egui::include_image!("../../assets/g.svg")),
+            'h' => Image::new(egui::include_image!("../../assets/h.svg")),
+            _ => unreachable!("There are only 8 columns on a chessboard a-h"),
+        },
+        AlphaNum::Num(n) => match n {
+            1 => Image::new(egui::include_image!("../../assets/1.svg")),
+            2 => Image::new(egui::include_image!("../../assets/2.svg")),
+            3 => Image::new(egui::include_image!("../../assets/3.svg")),
+            4 => Image::new(egui::include_image!("../../assets/4.svg")),
+            5 => Image::new(egui::include_image!("../../assets/5.svg")),
+            6 => Image::new(egui::include_image!("../../assets/6.svg")),
+            7 => Image::new(egui::include_image!("../../assets/7.svg")),
+            8 => Image::new(egui::include_image!("../../assets/8.svg")),
+            _ => unreachable!("There are only 8 rows on a chessboard 1-8"),
+        },
+    };
+
+    let square_size = square_size(ctx);
+    img.maintain_aspect_ratio(true)
+        .bg_fill(Color32::RED)
+        .fit_to_exact_size(
+            match alpha_num {
+                AlphaNum::Alpha(_) => [square_size, square_size / 3f32],
+                AlphaNum::Num(_) => [square_size / 3f32, square_size],
+            }
+            .into(),
+        )
+}
+
+pub(super) fn load_image_for_piece(
     ctx: &egui::Context,
     piece: Option<Piece>,
     who_is_checkmated: Option<Color>,
