@@ -7,7 +7,7 @@ use shakmaty::Color;
 use tokio::sync::mpsc;
 
 use anyhow::Result;
-use egui::{Align2, Grid, Image, ImageButton};
+use egui::{Align2, Button, Grid, Image, ImageButton};
 use requests::RequestLoopComm;
 use web_types::{EngineDescription, EngineDirectory, EngineRef, EngineVariant};
 
@@ -17,7 +17,7 @@ mod requests;
 pub struct App {
     chessboard: chess::ChessBoard,
     game_mode_selection: GameModeSelector,
-    fetch_engine_data: bool,
+    fetch_engine_list_first_boot: bool,
     engine_data: EngineData,
     request_loop_sender: mpsc::Sender<requests::RequestLoopComm>,
     engine_dir_receiver: Option<oneshot::Receiver<Result<EngineDirectory>>>,
@@ -44,7 +44,6 @@ struct EngineData {
     selected_engine: Option<EngineRef>,
     desc: Option<EngineDescription>,
     variant: Option<EngineVariant>,
-    engine_variant_uncommitted: bool,
 }
 
 impl App {
@@ -54,7 +53,7 @@ impl App {
         Self {
             chessboard: Default::default(),
             game_mode_selection: GameModeSelector::PlayAgainsAI,
-            fetch_engine_data: true,
+            fetch_engine_list_first_boot: true,
             engine_data: EngineData::default(),
             request_loop_sender: req_comm_loop,
             engine_desc_receiver: None,
@@ -92,6 +91,28 @@ impl App {
         });
     }
 
+    fn fetch_engine_description(&mut self) {
+        if let Some(selected_engine) = &self.engine_data.selected_engine {
+            let (sender, receiver) = oneshot::channel();
+            let req = RequestLoopComm::FetchEngineDescription(selected_engine.clone(), sender);
+            self.request_loop_sender
+                .try_send(req)
+                .expect("Error communicating with request loop");
+            self.engine_desc_receiver = Some(receiver);
+        }
+    }
+
+    fn fetch_engine_dir(&mut self) {
+        // Build a request to the request loop.
+        let (sender, receiver) = oneshot::channel();
+        let req = RequestLoopComm::FetchEngines(sender);
+        self.request_loop_sender
+            .try_send(req)
+            .expect("Error communicating with request loop");
+
+        self.engine_dir_receiver = Some(receiver);
+    }
+
     fn update_right_panel(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::right("engine_info").show(ctx, |ui| {
             ui.heading("Game settings");
@@ -99,16 +120,26 @@ impl App {
             egui::ComboBox::from_id_source("gamemode_selection")
                 .selected_text(format!("{}", self.game_mode_selection))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.game_mode_selection,
-                        GameModeSelector::PlayAgainsAI,
-                        format!("{}", GameModeSelector::PlayAgainsAI),
-                    );
-                    ui.selectable_value(
-                        &mut self.game_mode_selection,
-                        GameModeSelector::PlayAgainsYourself,
-                        format!("{}", GameModeSelector::PlayAgainsYourself),
-                    );
+                    if ui
+                        .selectable_value(
+                            &mut self.game_mode_selection,
+                            GameModeSelector::PlayAgainsAI,
+                            format!("{}", GameModeSelector::PlayAgainsAI),
+                        )
+                        .clicked()
+                    {
+                        self.chessboard.stop_game()
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut self.game_mode_selection,
+                            GameModeSelector::PlayAgainsYourself,
+                            format!("{}", GameModeSelector::PlayAgainsYourself),
+                        )
+                        .clicked()
+                    {
+                        self.chessboard.stop_game()
+                    }
                 });
 
             ui.horizontal(|ui| {
@@ -146,29 +177,27 @@ impl App {
                 self.chessboard.game_mode = GameMode::PlayAgainsYourself;
             } else {
                 ui.heading("Select engine");
-                if ui.button("Update info").clicked() {
+                if ui.button("Update info").clicked() || self.fetch_engine_list_first_boot {
                     self.engine_data.available_engines = None;
-                    // Build a request to the request loop.
-                    let (sender, receiver) = oneshot::channel();
-                    let req = RequestLoopComm::FetchEngines(sender);
-                    self.request_loop_sender
-                        .try_send(req)
-                        .expect("Error communicating with request loop");
-
-                    self.engine_dir_receiver = Some(receiver);
+                    self.fetch_engine_dir();
+                    self.fetch_engine_list_first_boot = false;
                 }
 
                 if let Some(recv) = &self.engine_dir_receiver {
                     if let Ok(Ok(engines)) = recv.try_recv() {
                         self.engine_data.available_engines = Some(engines.clone());
                         self.engine_data.selected_engine = Some(engines.engines[0].clone());
-                        self.engine_data.engine_variant_uncommitted = true;
+                        self.engine_dir_receiver = None;
+                    } else {
+                        ui.label("Loading engine list...");
+                        ui.spinner();
                     }
                 }
                 if let Some(data) = self.engine_data.selected_engine.as_mut() {
                     let cbox_resp = egui::ComboBox::from_id_source("engine_selection")
                         .selected_text(data.name.to_string())
                         .show_ui(ui, |ui| {
+                            let mut is_clicked = false;
                             for engine in self
                                 .engine_data
                                 .available_engines
@@ -177,17 +206,26 @@ impl App {
                                 .engines
                                 .iter()
                             {
-                                ui.selectable_value(data, engine.clone(), engine.name.clone());
+                                if ui
+                                    .selectable_value(data, engine.clone(), engine.name.clone())
+                                    .clicked()
+                                {
+                                    is_clicked = true;
+                                }
                             }
+                            is_clicked
                         });
+                    let selected_engine = data.clone();
 
-                    if cbox_resp.response.changed() {
+                    if cbox_resp.inner.is_some_and(|v| v) {
                         log::info!("Engine changed to: {data:?}");
-                        self.engine_data.engine_variant_uncommitted = true;
+                        self.chessboard.stop_game();
+                        self.engine_data.variant = None;
+                        self.engine_data.desc = None;
+                        self.fetch_engine_description();
                     }
 
                     Grid::new("current_engine_info").show(ui, |ui| {
-                        let selected_engine = data.clone();
                         ui.label("Name");
                         ui.label(selected_engine.name);
                         ui.end_row();
@@ -200,24 +238,23 @@ impl App {
                     });
                 }
 
-                if let Some(selected_engine) = &self.engine_data.selected_engine {
+                if let Some(_) = &self.engine_data.selected_engine {
                     ui.heading("Select variant");
                     if ui.button("Update info").clicked() {
-                        let (sender, receiver) = oneshot::channel();
-                        let req = RequestLoopComm::FetchEngineDescription(
-                            selected_engine.clone(),
-                            sender,
-                        );
-                        self.request_loop_sender
-                            .try_send(req)
-                            .expect("Error communicating with request loop");
-                        self.engine_desc_receiver = Some(receiver);
+                        self.fetch_engine_description();
+                    }
+                    if self.engine_data.desc.is_none() && self.engine_desc_receiver.is_none() {
+                        self.fetch_engine_description();
                     }
                     if let Some(recv) = &self.engine_desc_receiver {
                         if let Ok(Ok(desc)) = recv.try_recv() {
                             log::info!("Received engine description: {desc:?}");
                             self.engine_data.desc = Some(desc.clone());
-                            self.engine_data.engine_variant_uncommitted = true;
+                            self.engine_data.variant = None;
+                            self.engine_desc_receiver = None;
+                        } else {
+                            ui.label("Loading engine description...");
+                            ui.spinner();
                         }
                     }
                     if let Some(desc) = &mut self.engine_data.desc {
@@ -229,36 +266,77 @@ impl App {
                         }
 
                         let mut checkpoint = self.engine_data.variant.as_ref().unwrap().clone();
-                        egui::ComboBox::from_id_source("variant_selection")
+                        if egui::ComboBox::from_id_source("variant_selection")
                             .selected_text(checkpoint.name.to_string())
                             .show_ui(ui, |ui| {
+                                let mut is_clicked = false;
                                 for variant in &desc.variants {
-                                    ui.selectable_value(
-                                        &mut checkpoint,
-                                        variant.clone(),
-                                        variant.name.clone(),
-                                    );
+                                    is_clicked |= ui
+                                        .selectable_value(
+                                            &mut checkpoint,
+                                            variant.clone(),
+                                            variant.name.clone(),
+                                        )
+                                        .clicked();
                                 }
-                            });
-                        if Some(&checkpoint) != self.engine_data.variant.as_ref() {
+                                is_clicked
+                            })
+                            .inner
+                            .is_some_and(|v| v)
+                        {
                             log::info!("Changed variant: new is {checkpoint:?}");
-                            self.engine_data.engine_variant_uncommitted = true;
                             self.engine_data.variant = Some(checkpoint);
+                            self.chessboard.stop_game()
                         }
                     }
                 }
             }
-            if ui.button("Play").clicked() {
-                log::info!("Starting game!");
-                if let Some(variant) = &self.engine_data.variant {
-                    self.chessboard.game_mode = GameMode::PlayAgainsAI(AiGameSettings::new(
-                        variant.clone(),
-                        self.request_loop_sender.clone(),
-                    ));
-                } else {
-                    log::warn!("Tried to start game without any AI variant");
+            match self.game_mode_selection {
+                GameModeSelector::PlayAgainsAI => {
+                    if let Some(variant) = &self.engine_data.variant {
+                        if ui.button("Play vs AI").clicked() {
+                            log::info!("Starting AI game!");
+                            self.chessboard.game_mode =
+                                GameMode::PlayAgainsAI(AiGameSettings::new(
+                                    variant.clone(),
+                                    self.request_loop_sender.clone(),
+                                ));
+                            self.chessboard.start_game();
+                        }
+                    } else {
+                        ui.add_enabled(false, Button::new("Play vs AI"))
+                            .on_disabled_hover_text("Select an engine and variant first!");
+                    }
                 }
-                self.chessboard.start_game();
+                GameModeSelector::PlayAgainsYourself => {
+                    if ui.button("Start game").clicked() {
+                        log::info!("Starting self game!");
+                        self.chessboard.game_mode = GameMode::PlayAgainsYourself;
+                        self.chessboard.start_game();
+                    }
+                }
+            }
+
+            ui.separator();
+
+            if self.chessboard.is_waiting_for_ai_move() {
+                ui.label("Waiting for server's move...");
+                ui.spinner();
+            }
+            if let Some(status) = self.chessboard.last_ai_move_info() {
+                Grid::new("ai_move_table").show(ui, |ui| {
+                    ui.heading("Latest AI move");
+                    ui.end_row();
+                    ui.label("Notation");
+                    ui.label(status.move_san);
+                    ui.end_row();
+                    ui.label("Time taken for computation");
+                    ui.label(format!("{:?}", status.move_timing));
+                    ui.end_row();
+                    ui.label("Info");
+                    ui.label(status.status_text);
+                    ui.end_row();
+                });
             }
         });
     }

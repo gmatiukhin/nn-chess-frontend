@@ -87,6 +87,7 @@ pub(crate) struct ChessBoard {
     pub(crate) game_mode: GameMode,
     selection: Option<PieceSelection>,
     last_move: Option<LastMove>,
+    last_ai_move: Option<GameMoveResponse>,
     game_is_going: bool,
 }
 
@@ -98,6 +99,7 @@ impl Default for ChessBoard {
             game_mode: GameMode::PlayAgainsYourself,
             selection: None,
             last_move: None,
+            last_ai_move: None,
             game_is_going: false,
         }
     }
@@ -108,7 +110,16 @@ impl ChessBoard {
         self.chess = Chess::default();
         self.selection = None;
         self.last_move = None;
+        self.last_ai_move = None;
         self.game_is_going = true;
+    }
+
+    pub fn stop_game(&mut self) {
+        self.game_is_going = false;
+    }
+
+    pub fn last_ai_move_info(&self) -> Option<GameMoveResponse> {
+        self.last_ai_move.clone()
     }
 
     fn play_move(&mut self, m: &Move) {
@@ -116,6 +127,9 @@ impl ChessBoard {
         // squares ever become interactable
         self.chess.play_unchecked(m);
         log::debug!("Move played: {m:?}");
+        if let Move::EnPassant { .. } = m {
+            log::warn!("Holy Hell!");
+        }
         self.last_move = Some(if let Move::Castle { king, .. } = m {
             LastMove {
                 a: *king,
@@ -128,6 +142,19 @@ impl ChessBoard {
             }
         });
         self.selection = None;
+
+        // If the game is now over, then it is not going.
+        if self.chess.is_game_over() {
+            self.game_is_going = false;
+        }
+    }
+
+    pub fn is_waiting_for_ai_move(&self) -> bool {
+        if let GameMode::PlayAgainsAI(ai_game_settings) = &self.game_mode {
+            return ai_game_settings.engine_move_receiver.is_some();
+        }
+
+        false
     }
 
     pub fn update_ai_move(&mut self) {
@@ -147,6 +174,7 @@ impl ChessBoard {
                             .to_move(&self.chess)
                             .unwrap(),
                     );
+                    self.last_ai_move = Some(m);
                 }
             } else {
                 let fen = Fen::from_position(self.chess.clone(), shakmaty::EnPassantMode::Legal);
@@ -221,14 +249,16 @@ impl ChessBoard {
         if who_is_checkmated.is_some() {
             self.game_is_going = false;
         }
+
+        // To tint: the square must contain a piece.
         let check_tint = if let Some(p) = piece {
-            // First, the square must contain a piece.
+            // If the piece is a king,
             if let Piece {
                 color,
                 role: Role::King,
             } = p
             {
-                // If this piece is a king, and it is attacked
+                // and it is in check
                 if self
                     .chess
                     .board()
@@ -238,12 +268,18 @@ impl ChessBoard {
                     // Then tint it
                     PieceTint::IN_CHECK
                 } else {
+                    // king but not in check
                     Color32::WHITE
                 }
+            } else if self.chess.checkers().contains(square) {
+                // piece is not a king, but is a checker of the king
+                PieceTint::CHECKER
             } else {
+                // piece is neither a king nor a checker
                 Color32::WHITE
             }
         } else {
+            // no piece here
             Color32::WHITE
         };
         let img = ImageButton::new(
@@ -260,11 +296,15 @@ impl ChessBoard {
 
         // Perform actions based on the input
         if ui
-            .add(img.sense(egui::Sense {
-                click: self.game_is_going,
-                drag: false,
-                focusable: self.game_is_going,
-            }))
+            .add_enabled(
+                self.game_is_going,
+                img.sense(egui::Sense {
+                    click: self.game_is_going,
+                    drag: false,
+                    focusable: self.game_is_going,
+                }),
+            )
+            .on_disabled_hover_text("The game is not running; please start it in the menu")
             .clicked()
         {
             if let Some(piece) = piece {
@@ -284,6 +324,9 @@ impl ChessBoard {
                     log::info!("windo");
                 });
                 self.play_move(m);
+            } else {
+                // Clicked on blank square that selected piece can't move onto, so deselect
+                self.selection = None;
             }
         }
     }

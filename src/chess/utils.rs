@@ -66,4 +66,5 @@ pub struct PieceTint {}
 
 impl PieceTint {
     pub const IN_CHECK: Color32 = Color32::from_rgba_premultiplied(255, 0, 0, 255);
+    pub const CHECKER: Color32 = Color32::from_rgba_premultiplied(255, 0, 255, 255);
 }
