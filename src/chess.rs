@@ -1,4 +1,4 @@
-use egui::{Color32, Image, ImageButton};
+use egui::{Color32, Frame, ImageButton, Pos2};
 use shakmaty::{fen::Fen, san::San, Chess, Color, Move, Piece, Position, Role, Square};
 
 mod utils;
@@ -83,6 +83,7 @@ struct LastMove {
 
 struct PromotionData {
     show_promotion_choice: bool,
+    promotion_panel_anchor_pos: Pos2,
     color: Option<Color>,
     promotion_move: Option<Move>,
 }
@@ -109,6 +110,7 @@ impl Default for ChessBoard {
             last_ai_move: None,
             promotion: PromotionData {
                 show_promotion_choice: false,
+                promotion_panel_anchor_pos: Default::default(),
                 color: None,
                 promotion_move: None,
             },
@@ -261,7 +263,6 @@ impl ChessBoard {
         if who_is_checkmated.is_some() {
             self.game_is_going = false;
         }
-
         // To tint: the square must contain a piece.
         let check_tint = if let Some(p) = piece {
             // If the piece is a king,
@@ -307,15 +308,16 @@ impl ChessBoard {
             .and_then(|s| s.legal_moves.iter().position(|m| m.0 == square));
 
         // Perform actions based on the input
-        if ui
-            .add_enabled(
-                self.game_is_going,
-                img.sense(egui::Sense {
-                    click: self.game_is_going,
-                    drag: false,
-                    focusable: self.game_is_going,
-                }),
-            )
+        let resp = ui.add_enabled(
+            self.game_is_going,
+            img.sense(egui::Sense {
+                click: self.game_is_going,
+                drag: false,
+                focusable: self.game_is_going,
+            }),
+        );
+        if resp
+            .clone()
             .on_disabled_hover_text("The game is not running; please start it in the menu")
             .clicked()
             && !self.promotion.show_promotion_choice
@@ -336,6 +338,12 @@ impl ChessBoard {
                     self.promotion.show_promotion_choice = true;
                     self.promotion.color = Some(self.selection.as_ref().unwrap().piece.color);
                     self.promotion.promotion_move = Some(m);
+                    let rect = resp.rect;
+                    let ctr = rect.center();
+                    self.promotion.promotion_panel_anchor_pos = Pos2::new(
+                        ctr.x - 2.35f32 * rect.width(),
+                        ctr.y - 1.8f32 * rect.height(),
+                    );
                 } else {
                     self.play_move(&m);
                 }
@@ -345,35 +353,42 @@ impl ChessBoard {
         }
         if self.promotion.show_promotion_choice {
             egui::Window::new("Promotion!")
-                .movable(false)
+                .title_bar(false)
                 .resizable(false)
+                .collapsible(false)
+                .frame(Frame::default().outer_margin(10f32))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .fixed_pos(self.promotion.promotion_panel_anchor_pos)
                 .show(ctx, |ui| {
-                    for role in [Role::Queen, Role::Rook, Role::Bishop, Role::Knight] {
-                        let piece = Piece {
-                            color: self.promotion.color.unwrap(),
-                            role,
-                        };
-                        if ui
-                            .add(ImageButton::new(load_image_for_piece(
-                                ctx,
-                                Some(piece),
-                                None,
-                            )))
-                            .clicked()
-                        {
-                            self.promotion.show_promotion_choice = false;
-                            if let Some(m) = &self.promotion.promotion_move {
-                                let m = Move::Normal {
-                                    role: m.role(),
-                                    from: m.from().unwrap(),
-                                    capture: m.capture(),
-                                    to: m.to(),
-                                    promotion: Some(role),
-                                };
-                                self.play_move(&m);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = [1f32, 0f32].into();
+                        for role in [Role::Queen, Role::Rook, Role::Bishop, Role::Knight] {
+                            let piece = Piece {
+                                color: self.promotion.color.unwrap(),
+                                role,
+                            };
+                            if ui
+                                .add(ImageButton::new(
+                                    load_image_for_piece(ctx, Some(piece), None).fit_to_exact_size(
+                                        [square_size(ctx), square_size(ctx)].into(),
+                                    ),
+                                ))
+                                .clicked()
+                            {
+                                self.promotion.show_promotion_choice = false;
+                                if let Some(m) = &self.promotion.promotion_move {
+                                    let m = Move::Normal {
+                                        role: m.role(),
+                                        from: m.from().unwrap(),
+                                        capture: m.capture(),
+                                        to: m.to(),
+                                        promotion: Some(role),
+                                    };
+                                    self.play_move(&m);
+                                }
                             }
                         }
-                    }
+                    })
                 });
         }
     }
