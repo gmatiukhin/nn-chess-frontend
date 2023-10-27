@@ -195,13 +195,15 @@ impl ChessBoard {
         // squares ever become interactable
         self.chess.play_unchecked(m);
         log::debug!("Move played: {m:?}");
-        if let Move::EnPassant { .. } = m {
+        if m.is_en_passant() {
             log::warn!("Holy Hell!");
         }
         self.last_move = Some(if let Move::Castle { king, .. } = m {
             LastMove {
                 a: *king,
-                b: Square::from_coords(m.castling_side().unwrap().rook_to_file(), king.rank()),
+                b: m.castling_side()
+                    .unwrap()
+                    .king_to(self.selection.as_ref().unwrap().piece.color),
             }
         } else {
             LastMove {
