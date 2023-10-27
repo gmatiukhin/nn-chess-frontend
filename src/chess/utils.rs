@@ -12,11 +12,11 @@ pub(super) enum AlphaNum {
 
 pub(super) fn load_image_for_board_labels(
     ctx: &egui::Context,
-    alpha_num: AlphaNum,
+    alpha_num: Option<AlphaNum>,
 ) -> Image<'static> {
     let img = match alpha_num {
-        AlphaNum::Alpha(l) => match l {
-            'a' => Image::new(egui::include_image!("../../assets/wk.svg")),
+        Some(AlphaNum::Alpha(l)) => match l {
+            'a' => Image::new(egui::include_image!("../../assets/a.svg")),
             'b' => Image::new(egui::include_image!("../../assets/b.svg")),
             'c' => Image::new(egui::include_image!("../../assets/c.svg")),
             'd' => Image::new(egui::include_image!("../../assets/d.svg")),
@@ -26,7 +26,7 @@ pub(super) fn load_image_for_board_labels(
             'h' => Image::new(egui::include_image!("../../assets/h.svg")),
             _ => unreachable!("There are only 8 columns on a chessboard a-h"),
         },
-        AlphaNum::Num(n) => match n {
+        Some(AlphaNum::Num(n)) => match n {
             1 => Image::new(egui::include_image!("../../assets/1.svg")),
             2 => Image::new(egui::include_image!("../../assets/2.svg")),
             3 => Image::new(egui::include_image!("../../assets/3.svg")),
@@ -37,6 +37,7 @@ pub(super) fn load_image_for_board_labels(
             8 => Image::new(egui::include_image!("../../assets/8.svg")),
             _ => unreachable!("There are only 8 rows on a chessboard 1-8"),
         },
+        None => Image::new(egui::include_image!("../../assets/empty.svg")),
     };
 
     let square_size = square_size(ctx);
@@ -44,8 +45,9 @@ pub(super) fn load_image_for_board_labels(
         .bg_fill(Color32::RED)
         .fit_to_exact_size(
             match alpha_num {
-                AlphaNum::Alpha(_) => [square_size, square_size / 3f32],
-                AlphaNum::Num(_) => [square_size / 3f32, square_size],
+                Some(AlphaNum::Alpha(_)) => [square_size, square_size / 3f32],
+                Some(AlphaNum::Num(_)) => [square_size / 3f32, square_size],
+                None => [square_size / 3f32, square_size / 3f32],
             }
             .into(),
         )

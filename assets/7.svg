@@ -22,24 +22,18 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="12.775063"
-     inkscape:cx="14.794448"
-     inkscape:cy="21.64373"
+     inkscape:cx="14.833586"
+     inkscape:cy="21.643729"
      inkscape:window-width="1920"
-     inkscape:window-height="1026"
+     inkscape:window-height="1048"
      inkscape:window-x="0"
-     inkscape:window-y="22"
+     inkscape:window-y="0"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg4" />
-  <text
-     xml:space="preserve"
-     style="font-size:17.9084px;fill:#000000;stroke-width:1.49236"
-     x="2.4284859"
-     y="28.876026"
+  <path
+     d="M 4.8640282,28.876026 10.111189,17.522101 H 3.2164555 V 16.089429 H 11.794579 V 17.3072 L 6.601143,28.876026 Z"
      id="text4"
-     transform="scale(0.99923658,1.000764)"><tspan
-       sodipodi:role="line"
-       x="2.4284859"
-       y="28.876026"
-       style="font-size:17.9084px;stroke-width:1.49236"
-       id="tspan7">7</tspan></text>
+     style="font-size:17.9084px;stroke-width:1.49236"
+     transform="scale(0.99923658,1.000764)"
+     aria-label="7" />
 </svg>

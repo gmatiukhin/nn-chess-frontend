@@ -266,7 +266,7 @@ impl ChessBoard {
                 for row in 0..10 {
                     for column in 0..10 {
                         if (row == 0 || row == 9) && (column == 0 || column == 9) {
-                            ui.label("");
+                            ui.add(load_image_for_board_labels(ctx, None));
                             continue;
                         }
 
@@ -281,14 +281,14 @@ impl ChessBoard {
                             // ui.label(letters[column - 1]);
                             ui.add(load_image_for_board_labels(
                                 ctx,
-                                AlphaNum::Alpha(letters[column - 1]),
+                                Some(AlphaNum::Alpha(letters[column - 1])),
                             ));
                             continue;
                         }
 
                         if column == 0 || column == 9 {
                             // ui.label(numbers[row - 1].to_string());
-                            ui.add(load_image_for_board_labels(ctx, AlphaNum::Num(row)));
+                            ui.add(load_image_for_board_labels(ctx, Some(AlphaNum::Num(row))));
                             continue;
                         }
 
